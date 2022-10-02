@@ -40,9 +40,9 @@ class KMeans:
     def fit(self, X_train):
         """
         Initialize the centroids, using the "k-means++" method, where a random datapoint is selected as the first,
-        then the rest are initialized w/ probabilities proportional to their distances to the first
-        Pick a random point from train data for first centroid
+        then the rest are initialized w/ probabilities proportional to their distances to the first.
         """
+        # Pick a random point from train data for first centroid
         self.centroids = [random.choice(X_train)]
 
         for _ in range(self.n_clusters-1):
@@ -59,6 +59,7 @@ class KMeans:
         # This initial method of randomly selecting centroid starts is less effective
         # min_, max_ = np.min(X_train, axis=0), np.max(X_train, axis=0)
         # self.centroids = [uniform(min_, max_) for _ in range(self.n_clusters)]
+
         # Iterate, adjusting centroids until converged or until passed max_iter
         iteration = 0
         prev_centroids = None
@@ -107,20 +108,20 @@ if __name__ == "__main__":
     from sklearn.datasets import make_blobs
     import matplotlib.pyplot as plt
 
+    # need a custom cmap 
+    import matplotlib.cm as cm
+    from matplotlib.colors import Normalize
+    cmap = cm.tab10
+    norm = Normalize(vmin=0, vmax=5)   
+
     # Create a dataset of 2D distributions
     centers = 5
     X_train, true_labels = make_blobs(n_samples=100, centers=centers, random_state=42)
     X_train = StandardScaler().fit_transform(X_train)
 
     # Fit centroids to dataset
-    kmeans = KMeans(n_clusters=centers)
+    kmeans = KMeans(n_clusters=centers, max_iter=1000)
     kmeans.fit(X_train)
-
-    # need a custom cmap
-    import matplotlib.cm as cm
-    from matplotlib.colors import Normalize
-    cmap = cm.tab10
-    norm = Normalize(vmin=0, vmax=5)     
 
     #make colors array for each datapoint cluster label
     colors = [cmap(norm(label)) for label in true_labels]
@@ -131,4 +132,13 @@ if __name__ == "__main__":
     plt.plot([x for x, _ in kmeans.centroids],
              [y for _, y in kmeans.centroids],
              "k+", markersize=10)
+
+    # comparing to sklearn
+    # from sklearn.cluster import KMeans
+    # kmeans = KMeans(centers).fit(X_train)
+    # colors = [cmap(norm(label)) for label in kmeans.labels_]
+    # plt.scatter(X_train[:,0], X_train[:,1], c=colors)
+    # plt.plot(kmeans.cluster_centers_[:,0], kmeans.cluster_centers_[:,1], 
+    #          "k+", markersize=10)
+
     plt.show()
