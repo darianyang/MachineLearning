@@ -8,12 +8,14 @@ https://analyticsarora.com/k-means-for-beginners-how-to-build-from-scratch-in-py
 """
 
 import numpy as np
-import random
+import scipy
+#import random
 
 class KMeans:
     """
     Custom k-means clustering function with options for alternative distance metrics.
     """
+
     def __init__(self, n_clusters=8, max_iter=300, n_init=5, distance_metric="euclidean"):
         """
         Parameters
@@ -33,98 +35,126 @@ class KMeans:
         self.n_init = n_init
         self.distance_metric = distance_metric
 
-    def calc_distance(self, point, data):
-        """
-        Calculate the distance between point & data.
-        Point has dimensions (m,), data has dimensions (n,m), and output will be of size (n,).
-        """
-        # TODO: if self.name == euclidian and etc
-        return np.sqrt(np.sum((point - data)**2, axis=1))
+    # def calc_distance(self, point, data):
+    #     """
+    #     Calculate the distance between point & data.
+    #     Point has dimensions (m,), data has dimensions (n,m), and output will be of size (n,).
+    #     """
+    #     if self.distance_metric == "euclidean":
+    #         return np.sqrt(np.sum((point - data)**2, axis=1))
 
-    # TODO: call this euclidian and add others
+    #     elif self.distance_metric == "jaccard":
+    #         return
+
+    #     elif self.distance_metric == "cosine":
+    #         return 
+
+    #     elif self.distance_metric == "manhattan":
+    #         return
+
+    #     else:
+    #         raise ValueError(f"distance_metric must be 'euclidean', 'jaccard', 'cosine', or 'manhattan'.")
+
+    # def _init_centers(self, X):
+    #     """
+    #     Initialize the centroids, using the "k-means++" method, where a random datapoint is selected as the first,
+    #     then the rest are initialized w/ probabilities proportional to their distances to the first.
+
+    #     Parameters
+    #     ----------
+    #     X : NxD numpy array 
+    #         The observations.
+        
+    #     Returns
+    #     -------
+    #     centroids : array
+    #         Initial centroid positions.
+    #     """
+    #     # Pick a random point from train data for first centroid
+    #     # TODO: self.centroids?
+    #     centroids = [random.choice(X)]
+
+    #     # k-means++
+    #     for _ in range(self.n_clusters-1):
+    #         # Calculate distances from points to the centroids
+    #         dists = np.sum([self.calc_distance(centroid, X) for centroid in centroids], axis=0)
+    #         #print(dists)
+    #         #dists = np.sum(self.pairwise_dist(X, np.array(centroids)))
+            
+    #         # Normalize the distances
+    #         dists /= np.sum(dists)
+            
+    #         # Choose remaining points based on their distances
+    #         new_centroid_labels, = np.random.choice(range(len(X)), size=1, p=dists)
+    #         centroids += [X[new_centroid_labels]]
+
+    #     return np.array(centroids)
+
     def pairwise_dist(self, x, y):
         """
-        Euclidian pairwise distance matrix.
+        Generate a pairwise distance matrix.
 
         Parameters
         ----------
         x : N x D numpy array
+            e.g. X
         y : M x D numpy array
+            e.g. centers
 
         Returns
         -------
         dist: N x M array
-            Where dist2[i, j] is the euclidean distance between x[i, :] and y[j, :].
+            Where dist[i, j] is the distance between x[i, :] and y[j, :].
         """
-        xSumSquare = np.sum(np.square(x),axis=1)
-        ySumSquare = np.sum(np.square(y),axis=1)
-        mul = np.dot(x, y.T)
-        dists = np.sqrt(abs(xSumSquare[:, np.newaxis] + ySumSquare-2*mul))
-        return dists
+        # initialize an all-to-all matrix, with 0.0 for self distances (diagonal)
+        dist_matrix = np.zeros((x.shape[0], y.shape[0]))
 
-    def _get_loss(self, centers, cluster_labels, X):
-        """
-        Here, the loss function being optimized is the inertia of the resultant clusters.
+        # build distance matrix
+        for i, val_i in enumerate(x):
+            for j, val_j in enumerate(y):
 
-        Parameters
-        ----------
-        centers : KxD numpy array
-            Where K is the number of clusters, and D is the dimension.
-        cluster_labels : numpy array of length N 
-            The cluster assignment for each point.
-        X : NxD numpy array 
-            The observations
+                if self.distance_metric == "euclidean":
+                    # calculate Euclidean distance between two points 
+                    # points can be n-dimensional
+                    dist = np.linalg.norm(val_i - val_j)
+                    #dist = scipy.spatial.distance.euclidean(val_i, val_j)
+                elif self.distance_metric == "jaccard":
+                    dist = scipy.spatial.distance.jaccard(val_i, val_j)
 
-        Returns
-        -------
-        loss : float 
-            Inertia value of the current clustering iteration. 
-        """
-        dists = self.pairwise_dist(X, centers)
-        loss = 0.0
-        N, D = X.shape
+                elif self.distance_metric == "cosine":
+                    dist = scipy.spatial.distance.cosine(val_i, val_j)
 
-        for i in range(N):
-            loss = loss + np.square(dists[i][cluster_labels[i]])
-        
-        return loss
+                elif self.distance_metric == "manhattan":
+                    dist = scipy.spatial.distance.cityblock(val_i, val_j)
+                
+                elif self.distance_metric == "hamming":
+                    dist = scipy.spatial.distance.hamming(val_i, val_j)
+
+                else:
+                    raise ValueError(f"distance_metric must be 'euclidean', 'jaccard', 'cosine', 'manhattan'.")
+
+                dist_matrix[i,j] = dist
+
+        return dist_matrix
 
     def _init_centers(self, X):
         """
-        Initialize the centroids, using the "k-means++" method, where a random datapoint is selected as the first,
-        then the rest are initialized w/ probabilities proportional to their distances to the first.
-
         Parameters
         ----------
         X : NxD numpy array 
-            The observations.
+            Where N is # points and D is the dimensionality.
         
         Returns
         -------
-        centroids : array
-            Initial centroid positions.
+        centers : K x D numpy array 
         """
-        # Pick a random point from train data for first centroid
-        # TODO: self.centroids?
-        centroids = [random.choice(X)]
+        row, col = X.shape
+        retArr = np.empty([self.n_clusters, col])
+        for number in range(self.n_clusters):
+            randIndex = np.random.randint(row)
+            retArr[number] = X[randIndex]
 
-        # k-means++
-        for _ in range(self.n_clusters-1):
-            # Calculate distances from points to the centroids
-            dists = np.sum([self.calc_distance(centroid, X) for centroid in centroids], axis=0)
-            
-            # Normalize the distances
-            dists /= np.sum(dists)
-            
-            # Choose remaining points based on their distances
-            new_centroid_labels, = np.random.choice(range(len(X)), size=1, p=dists)
-            centroids += [X[new_centroid_labels]]
-
-        # This initial method of randomly selecting centroid starts is less effective
-        # min_, max_ = np.min(X_train, axis=0), np.max(X_train, axis=0)
-        # self.centroids = [uniform(min_, max_) for _ in range(self.n_clusters)]
-
-        return np.array(centroids)
+        return retArr
 
     def _update_assignment(self, centers, X):
         """
@@ -174,6 +204,33 @@ class KMeans:
         for i in range(K):
             new_centers[i] = np.mean(X[cluster_labels == i], axis = 0)
         return new_centers
+
+    def _get_loss(self, centers, cluster_labels, X):
+        """
+        Here, the loss function being optimized is the inertia of the resultant clusters.
+
+        Parameters
+        ----------
+        centers : KxD numpy array
+            Where K is the number of clusters, and D is the dimension.
+        cluster_labels : numpy array of length N 
+            The cluster assignment for each point.
+        X : NxD numpy array 
+            The observations
+
+        Returns
+        -------
+        loss : float 
+            Inertia value of the current clustering iteration. 
+        """
+        dists = self.pairwise_dist(X, centers)
+        loss = 0.0
+        N, D = X.shape
+
+        for i in range(N):
+            loss = loss + np.square(dists[i][cluster_labels[i]])
+        
+        return loss
 
     def _opt_clusters(self, X, init, abs_tol=1e-16, rel_tol=1e-16, verbose=False):
         """
@@ -257,7 +314,7 @@ if __name__ == "__main__":
 
     # Create a dataset of 2D distributions
     centers = 5
-    X_train, true_labels = make_blobs(n_samples=100, centers=centers, random_state=42)
+    X_train, true_labels = make_blobs(n_samples=100, centers=centers, random_state=42, n_features=2)
     X_train = StandardScaler().fit_transform(X_train)
 
     # comparing to sklearn
@@ -270,7 +327,7 @@ if __name__ == "__main__":
 
     # my kmeans implementation
     # Fit centroids to dataset
-    km = KMeans(n_clusters=centers)
+    km = KMeans(n_clusters=centers, distance_metric="euclidean")
     km.fit(X_train)
     print(km.inertia_)
 
