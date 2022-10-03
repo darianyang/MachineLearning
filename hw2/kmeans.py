@@ -9,13 +9,12 @@ https://analyticsarora.com/k-means-for-beginners-how-to-build-from-scratch-in-py
 
 import numpy as np
 import random
-from numpy.random import uniform
 
 class KMeans:
     """
     Custom k-means clustering function with options for alternative distance metrics.
     """
-    def __init__(self, n_clusters=8, max_iter=300, distance_metric="euclidean"):
+    def __init__(self, n_clusters=8, max_iter=300, n_init=5, distance_metric="euclidean"):
         """
         Parameters
         ----------
@@ -23,7 +22,7 @@ class KMeans:
             The number of clusters to form as well as the number of centroids to generate.
         max_iter : int
             Maximum number of iterations of the k-means algorithm for a single run.
-        n_init : int, default=10 (TODO)
+        n_init : int
             Number of times the k-means algorithm will be run with different centroid seeds. 
             The final results will be the best output of n_init consecutive runs in terms of inertia.
         distance_metric : str (TODO)
@@ -31,110 +30,216 @@ class KMeans:
         """
         self.n_clusters = n_clusters
         self.max_iter = max_iter
+        self.n_init = n_init
         self.distance_metric = distance_metric
 
-    def euclidean(self, point, data):
+    def calc_distance(self, point, data):
         """
-        Euclidean distance between point & data.
+        Calculate the distance between point & data.
         Point has dimensions (m,), data has dimensions (n,m), and output will be of size (n,).
         """
+        # TODO: if self.name == euclidian and etc
         return np.sqrt(np.sum((point - data)**2, axis=1))
 
-    def _calc_inertia(self):
+    # TODO: call this euclidian and add others
+    def pairwise_dist(self, x, y):
         """
-        Calculate the inertia of a clustering run.
-        """
-        pass
+        Euclidian pairwise distance matrix.
 
-    # TODO
-    def _get_loss(self, centers, cluster_idx, points):
-        """
-        The loss function is the metric by which we evaluate the performance of our clustering algorithm. 
-        Our loss is simply the sum of the square distances between each point and its cluster centroid.
+        Parameters
+        ----------
+        x : N x D numpy array
+        y : M x D numpy array
 
-        Args:
-            centers: KxD numpy array, where K is the number of clusters, and D is the dimension
-            cluster_idx: numpy array of length N, the cluster assignment for each point
-            points: NxD numpy array, the observations
-        Return:
-            loss: a single float number, which is the objective function of KMeans. 
+        Returns
+        -------
+        dist: N x M array
+            Where dist2[i, j] is the euclidean distance between x[i, :] and y[j, :].
         """
-        dists = self.pairwise_dist(points, centers)
+        xSumSquare = np.sum(np.square(x),axis=1)
+        ySumSquare = np.sum(np.square(y),axis=1)
+        mul = np.dot(x, y.T)
+        dists = np.sqrt(abs(xSumSquare[:, np.newaxis] + ySumSquare-2*mul))
+        return dists
+
+    def _get_loss(self, centers, cluster_labels, X):
+        """
+        Here, the loss function being optimized is the inertia of the resultant clusters.
+
+        Parameters
+        ----------
+        centers : KxD numpy array
+            Where K is the number of clusters, and D is the dimension.
+        cluster_labels : numpy array of length N 
+            The cluster assignment for each point.
+        X : NxD numpy array 
+            The observations
+
+        Returns
+        -------
+        loss : float 
+            Inertia value of the current clustering iteration. 
+        """
+        dists = self.pairwise_dist(X, centers)
         loss = 0.0
-        N, D = points.shape
+        N, D = X.shape
+
         for i in range(N):
-            loss = loss + np.square(dists[i][cluster_idx[i]])
+            loss = loss + np.square(dists[i][cluster_labels[i]])
         
         return loss
 
-    def _init_centers(self):
+    def _init_centers(self, X):
         """
         Initialize the centroids, using the "k-means++" method, where a random datapoint is selected as the first,
         then the rest are initialized w/ probabilities proportional to their distances to the first.
+
+        Parameters
+        ----------
+        X : NxD numpy array 
+            The observations.
+        
+        Returns
+        -------
+        centroids : array
+            Initial centroid positions.
         """
-        # TODO: put this whole process in a loop for the n_init
         # Pick a random point from train data for first centroid
-        self.centroids = [random.choice(X_train)]
+        # TODO: self.centroids?
+        centroids = [random.choice(X)]
 
         # k-means++
         for _ in range(self.n_clusters-1):
             # Calculate distances from points to the centroids
-            dists = np.sum([self.euclidean(centroid, X_train) for centroid in self.centroids], axis=0)
+            dists = np.sum([self.calc_distance(centroid, X) for centroid in centroids], axis=0)
             
             # Normalize the distances
             dists /= np.sum(dists)
             
             # Choose remaining points based on their distances
-            new_centroid_idx, = np.random.choice(range(len(X_train)), size=1, p=dists)
-            self.centroids += [X_train[new_centroid_idx]]
+            new_centroid_labels, = np.random.choice(range(len(X)), size=1, p=dists)
+            centroids += [X[new_centroid_labels]]
 
         # This initial method of randomly selecting centroid starts is less effective
         # min_, max_ = np.min(X_train, axis=0), np.max(X_train, axis=0)
         # self.centroids = [uniform(min_, max_) for _ in range(self.n_clusters)]
 
-    def fit(self, X_train):
-        # first initialize centers using k-means++
-        self._init_centers()
+        return np.array(centroids)
 
-        # Iterate, adjusting centroids until converged or until passed max_iter
-        iteration = 0
-        prev_centroids = None
-        while np.not_equal(self.centroids, prev_centroids).any() and iteration < self.max_iter:
-            
-            # Sort each datapoint, assigning to nearest centroid
-            sorted_points = [[] for _ in range(self.n_clusters)]
-            
-            for x in X_train:
-                dists = self.euclidean(x, self.centroids)
-                centroid_idx = np.argmin(dists)
-                sorted_points[centroid_idx].append(x)
-            
-            # Push current centroids to previous, reassign centroids as mean of the points belonging to them
-            prev_centroids = self.centroids
-            self.centroids = [np.mean(cluster, axis=0) for cluster in sorted_points]
-            
-            for i, centroid in enumerate(self.centroids):
-                # Catch any np.nans, resulting from a centroid having no points
-                if np.isnan(centroid).any():
-                    self.centroids[i] = prev_centroids[i]
-            
-            iteration += 1
-
-    def evaluate(self, X):
+    def _update_assignment(self, centers, X):
         """
-        Eval func
+        For choosing which cluster each point should belong to. 
+
+        Parameters
+        ----------
+        centers: KxD numpy array
+            Where K is the number of clusters, and D is the dimension.
+        X: NxD numpy array
+            The observations.
+
+        Returns
+        -------
+        cluster_labels: numpy array of length N 
+            The cluster assignments for each point.
         """
-        centroids = []
-        centroid_idxs = []
+        row, col = X.shape
+        cluster_labels = np.empty([row])
+        distances = self.pairwise_dist(X, centers)
+        cluster_labels = np.argmin(distances, axis=1)
 
-        for x in X:
-            dists = self.euclidean(x, self.centroids)
-            centroid_idx = np.argmin(dists)
-            centroids.append(self.centroids[centroid_idx])
-            centroid_idxs.append(centroid_idx)
+        return cluster_labels
 
-        return centroids, centroid_idxs
+    def _update_centers(self, old_centers, cluster_labels, X):
+        """
+        Averages all the points that belong to a given cluster. 
+        This average is the new centroid of the respective cluster. 
+        This function returns the array of new centers.
 
+        Parameters
+        ----------
+        old_centers: KxD numpy array
+            Where K is the number of clusters, and D is the dimension.
+        cluster_labels : numpy array of length N 
+            The cluster assignment for each point.
+        X : NxD numpy array 
+            The observations.
+        
+        Returns
+        -------
+        centers : K x D numpy array
+            New centers where K is the number of clusters, and D is the dimension.
+        """
+        K, D = old_centers.shape
+        new_centers = np.empty(old_centers.shape)
+        for i in range(K):
+            new_centers[i] = np.mean(X[cluster_labels == i], axis = 0)
+        return new_centers
+
+    def _opt_clusters(self, X, init, abs_tol=1e-16, rel_tol=1e-16, verbose=False):
+        """
+        Optimize clusters for one initialization of k-means.
+        """
+        centers = self._init_centers(X)
+
+        for it in range(self.max_iter):
+            cluster_labels = self._update_assignment(centers, X)
+            centers = self._update_centers(centers, cluster_labels, X)
+            loss = self._get_loss(centers, cluster_labels, X)
+            
+            if it:
+                diff = np.abs(prev_loss - loss)
+                # loss function based convergence within tolerance
+                if diff < abs_tol and diff / prev_loss < rel_tol:
+                    break
+
+            prev_loss = loss
+            if verbose:
+                print("init %d, iter %d, loss: %.4f" % (init, it, loss))
+
+        return cluster_labels, centers, loss
+
+    def fit(self, X, abs_tol=1e-16, rel_tol=1e-16, verbose=False):
+        """
+        Main public method for fitting k-means model.
+
+        Parameters
+        ----------
+        X : NxD array
+            Where N is # points and D is the dimensionality.
+        abs_tol : float
+            Convergence criteria w.r.t absolute change of loss.
+        rel_tol : float 
+            Convergence criteria w.r.t relative change of loss.
+        verbose : bool
+            Boolean to set whether method should print loss function (inertia).
+            
+        Returns
+        -------
+        cluster_labels : Nx1 int numpy array
+            Labels for each data point.
+        centers : K x D numpy array
+            K centroid positions.
+        loss : float
+            Final inertia value of the objective function of KMeans.
+        """
+        # run k-means fitting n_init times and select the best result from different initializations
+        final_loss = 99999999
+        for init in range(self.n_init):
+
+            cluster_labels, centers, loss = self._opt_clusters(X, init, abs_tol, rel_tol, verbose)
+            
+            # replace the final values if the inertia is better
+            if loss < final_loss:
+                final_cluster_labels = cluster_labels
+                final_centers = centers
+                final_loss = loss
+
+        # update sklearn like class attributes with final fit values
+        self.labels_ = final_cluster_labels
+        self.cluster_centers_ = final_centers
+        self.inertia_ = final_loss
+
+        #return cluster_labels, centers, loss
 
 
 # test this clustering method on some example data
@@ -155,20 +260,6 @@ if __name__ == "__main__":
     X_train, true_labels = make_blobs(n_samples=100, centers=centers, random_state=42)
     X_train = StandardScaler().fit_transform(X_train)
 
-    # Fit centroids to dataset
-    kmeans = KMeans(n_clusters=centers, max_iter=1000)
-    kmeans.fit(X_train)
-
-    #make colors array for each datapoint cluster label
-    colors = [cmap(norm(label)) for label in true_labels]
-
-    # View results
-    class_centers, classification = kmeans.evaluate(X_train)
-    plt.scatter(X_train[:,0], X_train[:,1], c=colors)
-    plt.plot([x for x, _ in kmeans.centroids],
-             [y for _, y in kmeans.centroids],
-             "k+", markersize=10)
-
     # comparing to sklearn
     # from sklearn.cluster import KMeans
     # kmeans = KMeans(centers).fit(X_train)
@@ -176,5 +267,19 @@ if __name__ == "__main__":
     # plt.scatter(X_train[:,0], X_train[:,1], c=colors)
     # plt.plot(kmeans.cluster_centers_[:,0], kmeans.cluster_centers_[:,1], 
     #          "k+", markersize=10)
+
+    # my kmeans implementation
+    # Fit centroids to dataset
+    km = KMeans(n_clusters=centers)
+    km.fit(X_train)
+    print(km.inertia_)
+
+    #make colors array for each datapoint cluster label
+    colors = [cmap(norm(label)) for label in km.labels_]
+
+    # View results
+    plt.scatter(X_train[:,0], X_train[:,1], c=colors)
+    plt.plot(km.cluster_centers_[:,0], km.cluster_centers_[:,1], 
+             "k+", markersize=10)
 
     plt.show()
