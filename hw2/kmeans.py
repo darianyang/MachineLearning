@@ -279,8 +279,12 @@ class KMeans:
         loss : float
             Final inertia value of the objective function of KMeans.
         """
+        # dummy variables for reference management
+        final_cluster_labels = []
+        final_centers = []
+        final_loss = 99999999999999999
+
         # run k-means fitting n_init times and select the best result from different initializations
-        final_loss = 99999999
         for init in range(self.n_init):
 
             cluster_labels, centers, loss = self._opt_clusters(X, init, abs_tol, rel_tol, verbose)
