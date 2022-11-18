@@ -11,7 +11,7 @@ fi
 
 # cpptraj input
 CMD="     parm ${PDB}_dry.prmtop \n" 
-CMD="$CMD trajin ${PDB}_1us_1000i.nc \n"
+CMD="$CMD trajin ${PDB}_1us_1000i.nc 1 1000 1 \n"
 CMD="$CMD reference 2kod_solv.pdb name [nmr] \n"
 CMD="$CMD reference 1a43_solv.pdb :* name [xtal] \n"
 CMD="$CMD parm hex_leap.pdb [hexparm] \n"
