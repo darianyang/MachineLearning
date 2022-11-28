@@ -64,7 +64,7 @@ class ML_Pcoord:
             path.append((it,wlk))
         return np.array(sorted(path, key=lambda x: x[0]))
 
-    def create_ml_input(self, savefile=None):
+    def create_ml_input(self, label_space=["pcoord_0", "gt", 37], savefile=None):
         """
         Need a dataset from west.h5 as follows:
         rows: 1 for each segment of --last-iter, traced back to bstate to rep each iteration
@@ -74,6 +74,11 @@ class ML_Pcoord:
 
         Parameters
         ----------
+        label_space : list
+            List of 3 elements: [(feat_name), (gt or lt), (float or int)]
+            This determines which segments are labeled as True.
+            e.g. label_space=["pcoord_0", "gt", 37]
+                 every seg with pcoord_0 value > 37 will be counted as True.
         savefile : str
             Optional path to save the output ml_input array as a tsv.
 
@@ -85,12 +90,18 @@ class ML_Pcoord:
         ml_input = np.zeros((self.segs_in_last, self.last_iter * self.n_features))
         # as expected, it is 24 by (137i * (47 aux + 2 pcoord) features) = 6713 rows
 
+        # 1d empty array for binary y labels
+        seg_labels = np.zeros((self.segs_in_last))
+
         ### fill the empty array ###
         # loop each segment index of the last_iter choosen
         for seg_i in tqdm(range(self.segs_in_last), desc="Creating initial input array"):
             # get trace path back to bstate
             trace = self.trace_walker((self.last_iter, seg_i))
-            
+
+            # for labeling as T or F, start as F
+            label = 0
+
             # take trace path and loop each (it, wlk) item (begins at i1)
             for it, wlk in trace:
                 # loop each feature name
@@ -113,24 +124,72 @@ class ML_Pcoord:
                         # (if tau=11) goes from row to column (1, 11) to (11, 1); pcoord is (11, n)
                         it_wlk_feat_data = it_wlk_feat_data.reshape(self.tau, 1)
 
+                    # matching the input feature name for label cutoff
+                    if feat == label_space[0]:
+                        # if a certain cutoff is met, set label as true (1), otherwise false (0)
+                        if label_space[1] == "gt":
+                            if np.any(it_wlk_feat_data[:,feat_depth] > label_space[2]):
+                                label = 1
+                        elif label_space[1] == "lt":
+                            if np.any(it_wlk_feat_data[:,feat_depth] < label_space[2]):
+                                label = 1
+                        else:
+                            raise ValueError(f"label_space[1] must be 'gt' or 'lt', not {label_space[1]}")
+
                     # ∆feat = |last frame - first frame|
                     d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
-                                        it_wlk_feat_data[:, feat_depth][0])
+                                         it_wlk_feat_data[:, feat_depth][0])
 
                     # assign values of ml_input array (row=seg_i, col=feat_i+((it-1)*n_features))
                     ml_input[seg_i, feat_i + ((it - 1) * self.n_features)] = d_feat
 
+            # label the segment
+            seg_labels[seg_i] = label
+
         # optionally save to file
         if savefile:
-            np.savetxt(savefile, ml_input, delimiter="\t")
+            np.savetxt("X_" + savefile, ml_input, delimiter="\t")
+            np.savetxt("y_" + savefile, seg_labels, delimiter="\t")
 
-        return ml_input
+        # TODO: may need to reshape the seg_labels
+        return ml_input, seg_labels
                 
+    def objective_f(self, iter_w, feat_w):
+        """
+        Objective function to be minimized.
+
+        Parameters
+        ----------
+        iter_w : 1d array
+            weights to be optimized for each iteration considered.
+        feat_w : 1d array
+            weights to be optimized for each feature.
+
+        Returns
+        -------
+        score : float
+            -ROCAUC score using the input weights.
+            Negative since being minimized, here ROCAUC must be maximized.
+        """
+        pass
+
+    def optimize_pcoord(self):
+        """
+        Main public method:
+        Optimizes a linear combination of pcoords and returns weights
+        for each input feature. These weights can be used to calculate
+        a high dimensional pcoord during a westpa run.
+        """
+        # don't create the ml_input array if provided
+        if self.ml_input is None:
+            self.ml_input = self.create_ml_input()
+
+        pass
 
 # eventually for optimized weight tracking, make dict of aux names
 
 if __name__ == "__main__":
-    # ml = ML_Pcoord()
-    # ml.create_ml_input("we_ml.tsv")
+    ml = ML_Pcoord()
+    ml.create_ml_input()
 
-    print(np.loadtxt("we_ml.tsv"))
+    #print(np.loadtxt("we_ml.tsv"))
