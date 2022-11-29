@@ -11,6 +11,9 @@ import sklearn.metrics
 from tqdm.auto import tqdm
 import sys
 
+# Suppress divide-by-zero in log
+np.seterr(divide="ignore", invalid="ignore")
+
 class ML_Pcoord:
     def __init__(self, h5="data/ctd_ub_1d_v00.h5", last_iter=137, ml_input=None, seg_labels=None):
         """
@@ -166,7 +169,7 @@ class ML_Pcoord:
         # TODO: may need to reshape the seg_labels
         return ml_input, seg_labels
 
-    def calc_seg_scores(self, iter_w, feat_w):
+    def calc_loss(self, iter_w, feat_w):
         """
         A score calculation method for min objective functions.
         TODO: eventually can try other segment scoring (e.g. rank instead of average)
@@ -181,18 +184,32 @@ class ML_Pcoord:
 
         Returns
         -------
-        seg_scores : 1d array
-            Array of weighted averages for each segment/row.
+        rocauc : float
+            -ROCAUC score using the input weights.
+            Negative since being minimized, here ROCAUC must be maximized.
         """
         # map set of n_features for each iter to n_iter scores using feat_w weights
         # ml_input (n_segs rows and n_iters * n_features cols) --> n_segs rows and n_iters cols
+        # first make a new array of the feature weighted ∆values of ml_input
+        feat_weighted = np.zeros((self.segs_in_last, self.last_iter))
 
-        # weight each iter using iter_w weights
+        #for each iteration, weight the feature set and get a score
+        for iter in range(self.last_iter):
+            # weights per column, which are the features/auxnames
+            # apply feature weights and get weighted average per row/seg
+            feat_w_scores = \
+                np.average(self.ml_input[:, iter * self.n_features:(iter + 1) * self.n_features], 
+                           weights=feat_w, axis=1)
+            # fill feat_weighted array with the feature weighted average
+            feat_weighted[:,iter] = feat_w_scores
+
+        # then take the iter weighted average of the feature weighted condensed array
+        # this is the final weighted scores
+        seg_scores = np.average(feat_weighted, weights=iter_w, axis=1)
         
-        # calculate the weighted average score of each segment/row
-        
-        # return the 1d array of segment scores
-        pass
+        # calc rocauc value and return the negative (min negative to maximize rocauc)
+        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
+        return -rocauc
 
     def iter_f(self, iter_w, feat_w):
         """
@@ -208,16 +225,10 @@ class ML_Pcoord:
 
         Returns
         -------
-        rocauc : float
-            -ROCAUC score using the input weights.
-            Negative since being minimized, here ROCAUC must be maximized.
+        score : float
+            Single float depending on the scoring metric used.
         """
-        # map each row of self.ml_input to a weighted average score per row/segment
-        seg_scores = self.calc_seg_scores(iter_w, feat_w)
-
-        # calc rocauc value and return the negative (min negative to maximize rocauc)
-        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
-        return -rocauc
+        return self.calc_loss(iter_w, feat_w)
 
     def feat_f(self, feat_w, iter_w):
         """
@@ -233,16 +244,10 @@ class ML_Pcoord:
 
         Returns
         -------
-        rocauc : float
-            -ROCAUC score using the input weights.
-            Negative since being minimized, here ROCAUC must be maximized.
+        score : float
+            Single float depending on the scoring metric used.
         """
-        # map each row of self.ml_input to a weighted average score per row/segment
-        seg_scores = self.calc_seg_scores(iter_w, feat_w)
-
-        # calc rocauc value and return the negative (min negative to maximize rocauc)
-        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
-        return -rocauc
+        return self.calc_loss(iter_w, feat_w)
 
     def optimize_pcoord(self, recycle=3):
         """
@@ -273,7 +278,9 @@ class ML_Pcoord:
 
         # get constant starting weights
         iter_w = np.array([1/self.last_iter for _ in range(self.last_iter)])
-        feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
+        #feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
+        feat_w = np.random.dirichlet(np.ones(self.n_features),size=1).reshape(-1)
+        print("Original Weights:", feat_w)
 
         # implement bounds for each scalar in output array (0-1)
         iter_bounds = tuple((0,1) for _ in range(self.last_iter))
@@ -285,10 +292,14 @@ class ML_Pcoord:
         # eps = step size used for estimation of jacobian in minimization
         # eps must be large enough to get out of local mimima for SLSQP
         # TODO: do something like stochastic GD where there is a variety of step sizes
-        options = {"eps": 1}
+        #options = {"eps": 1.4901161193847656e-08}
+        #options = {"eps": 1}
         
         # repeat iter then feat weight minimization n times
         for cycle in range(recycle):
+            # gradually decrease step size per cycle
+            options = {"eps": 10**-cycle}
+
             # first optimize iteration weights
             # SLSQP local minimization method for each scalar in output array 
             iter_min = scipy.optimize.minimize(self.iter_f, iter_w, 
@@ -325,4 +336,7 @@ if __name__ == "__main__":
     # ml.create_ml_input(savefile="ml_input.tsv")
 
     ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
-    ml.optimize_pcoord()
+    iw, fw = ml.optimize_pcoord()
+    print(fw)
+
+    #print(np.loadtxt("X_ml_input.tsv").shape)
