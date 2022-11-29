@@ -166,19 +166,45 @@ class ML_Pcoord:
         # TODO: may need to reshape the seg_labels
         return ml_input, seg_labels
 
-    def objective_f(self, w1, w2):
+    def calc_seg_scores(self, iter_w, feat_w):
         """
-        Objective function to be minimized for iteration weight optimization.
+        A score calculation method for min objective functions.
         TODO: eventually can try other segment scoring (e.g. rank instead of average)
               and other loss metrics, e.g. pROCAUC instead of ROCAUC.
 
         Parameters
         ----------
-        w1 : 1d array
-            Weights to be optimized.
+        iter_w : 1d array
+            Weights for each iteration.
+        feat_w : 1d array
+            Weights for each feature.
+
+        Returns
+        -------
+        seg_scores : 1d array
+            Array of weighted averages for each segment/row.
+        """
+        # map set of n_features for each iter to n_iter scores using feat_w weights
+        # ml_input (n_segs rows and n_iters * n_features cols) --> n_segs rows and n_iters cols
+
+        # weight each iter using iter_w weights
+        
+        # calculate the weighted average score of each segment/row
+        
+        # return the 1d array of segment scores
+        pass
+
+    def iter_f(self, iter_w, feat_w):
+        """
+        Objective function to be minimized for iteration weight optimization.
+
+        Parameters
+        ----------
+        iter_w : 1d array
+            Weights to be optimized for each iteration.
             (minimization variable)
-        w2 : 1d array
-            A set weights arg.
+        feat_w : 1d array
+            Static weights for each feature.
 
         Returns
         -------
@@ -186,12 +212,33 @@ class ML_Pcoord:
             -ROCAUC score using the input weights.
             Negative since being minimized, here ROCAUC must be maximized.
         """
-        # sort input weights into iteration and feature weights
-        # TODO: maybe make a scoring function method for both objective functions
         # map each row of self.ml_input to a weighted average score per row/segment
-        
-        # array of weighted averages for each segment/row.
-        seg_scores = 0
+        seg_scores = self.calc_seg_scores(iter_w, feat_w)
+
+        # calc rocauc value and return the negative (min negative to maximize rocauc)
+        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
+        return -rocauc
+
+    def feat_f(self, feat_w, iter_w):
+        """
+        Objective function to be minimized for feature weight optimization.
+
+        Parameters
+        ----------
+        feat_w : 1d array
+            Weights to be optimized for each feature.
+            (minimization variable)
+        iter_w : 1d array
+            Static weights for each iteration.
+
+        Returns
+        -------
+        rocauc : float
+            -ROCAUC score using the input weights.
+            Negative since being minimized, here ROCAUC must be maximized.
+        """
+        # map each row of self.ml_input to a weighted average score per row/segment
+        seg_scores = self.calc_seg_scores(iter_w, feat_w)
 
         # calc rocauc value and return the negative (min negative to maximize rocauc)
         rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
@@ -228,9 +275,6 @@ class ML_Pcoord:
         iter_w = np.array([1/self.last_iter for _ in range(self.last_iter)])
         feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
 
-        # I should take weights from one opt, pass them back and forth a few times
-        # is this backpropagation?
-
         # implement bounds for each scalar in output array (0-1)
         iter_bounds = tuple((0,1) for _ in range(self.last_iter))
         feat_bounds = tuple((0,1) for _ in range(self.n_features))
@@ -247,7 +291,7 @@ class ML_Pcoord:
         for cycle in range(recycle):
             # first optimize iteration weights
             # SLSQP local minimization method for each scalar in output array 
-            iter_min = scipy.optimize.minimize(self.objective_f, iter_w, 
+            iter_min = scipy.optimize.minimize(self.iter_f, iter_w, 
                                                constraints=constraints, args=(feat_w),
                                                bounds=iter_bounds, options=options)
             
@@ -258,7 +302,7 @@ class ML_Pcoord:
 
             # then optimize feature weighs using optimized iteration weights
             # SLSQP local minimization method for each scalar in output array 
-            feat_min = scipy.optimize.minimize(self.objective_f, feat_w, 
+            feat_min = scipy.optimize.minimize(self.feat_f, feat_w, 
                                                constraints=constraints, args=(iter_w),
                                                bounds=feat_bounds, options=options)
             
