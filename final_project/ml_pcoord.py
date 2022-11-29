@@ -14,7 +14,7 @@ import sys
 class ML_Pcoord:
     def __init__(self, h5="data/ctd_ub_1d_v00.h5", last_iter=137, ml_input=None, seg_labels=None):
         """
-        Methods for generating a machine learning based pcoord from a west.h5 file.
+        Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
         Parameters
         ----------
@@ -55,11 +55,12 @@ class ML_Pcoord:
         self.feat_names = [f"pcoord_{dim}" for dim in range(n_pcoords)] + \
                            list(self.h5[f"iterations/iter_{last_iter:08d}/auxdata"])
 
-    ### trace helper methods normally avail in wedap ###
+    ### trace_walker and get_parents helper methods normally avail in wedap ###
     def get_parents(self, walker_tuple):
         it, wlk = walker_tuple
         parent = self.h5[f"iterations/iter_{it:08d}"]["seg_index"]["parent_id"][wlk]
         return it-1, parent
+
     def trace_walker(self, walker_tuple):
         # Unroll the tuple into iteration/walker 
         it, wlk = walker_tuple
@@ -164,18 +165,20 @@ class ML_Pcoord:
 
         # TODO: may need to reshape the seg_labels
         return ml_input, seg_labels
-                
-    def iteration_f(self, iter_w, feat_w):
+
+    def objective_f(self, w1, w2):
         """
         Objective function to be minimized for iteration weight optimization.
+        TODO: eventually can try other segment scoring (e.g. rank instead of average)
+              and other loss metrics, e.g. pROCAUC instead of ROCAUC.
 
         Parameters
         ----------
-        iter_w : 1d array
-            weights to be optimized for each iteration considered.
+        w1 : 1d array
+            Weights to be optimized.
             (minimization variable)
-        feat_w : 1d array
-            weights to be optimized for each feature.
+        w2 : 1d array
+            A set weights arg.
 
         Returns
         -------
@@ -184,35 +187,12 @@ class ML_Pcoord:
             Negative since being minimized, here ROCAUC must be maximized.
         """
         # sort input weights into iteration and feature weights
-        # first map each row of self.ml_input to a weighted average score per row/segment
+        # TODO: maybe make a scoring function method for both objective functions
+        # map each row of self.ml_input to a weighted average score per row/segment
         
+        # array of weighted averages for each segment/row.
         seg_scores = 0
-        # calc rocauc value and return the negative (min negative to maximize rocauc)
-        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
-        return -rocauc
 
-    def feature_f(self, feat_w, iter_w):
-        """
-        Objective function to be minimized for feature weight optimization.
-
-        Parameters
-        ----------
-        feat_w : 1d array
-            weights to be optimized for each feature.
-            (minimization variable)
-        iter_w : 1d array
-            weights to be optimized for each iteration considered.
-
-        Returns
-        -------
-        rocauc : float
-            -ROCAUC score using the input weights.
-            Negative since being minimized, here ROCAUC must be maximized.
-        """
-        # sort input weights into iteration and feature weights
-        # first map each row of self.ml_input to a weighted average score per row/segment
-        
-        seg_scores = 0
         # calc rocauc value and return the negative (min negative to maximize rocauc)
         rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
         return -rocauc
@@ -267,7 +247,7 @@ class ML_Pcoord:
         for cycle in range(recycle):
             # first optimize iteration weights
             # SLSQP local minimization method for each scalar in output array 
-            iter_min = scipy.optimize.minimize(self.iter_f, iter_w, 
+            iter_min = scipy.optimize.minimize(self.objective_f, iter_w, 
                                                constraints=constraints, args=(feat_w),
                                                bounds=iter_bounds, options=options)
             
@@ -278,9 +258,9 @@ class ML_Pcoord:
 
             # then optimize feature weighs using optimized iteration weights
             # SLSQP local minimization method for each scalar in output array 
-            feat_min = scipy.optimize.minimize(self.feature_f, feat_w, 
+            feat_min = scipy.optimize.minimize(self.objective_f, feat_w, 
                                                constraints=constraints, args=(iter_w),
-                                               bounds=iter_bounds, options=options)
+                                               bounds=feat_bounds, options=options)
             
             # set new weights var to be output array of minimization
             feat_w = feat_min.x
