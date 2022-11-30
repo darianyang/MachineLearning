@@ -6,6 +6,7 @@ TODO: Eventually, integrate into wedap.
 import numpy as np
 import h5py
 
+import matplotlib.pyplot as plt
 import scipy.optimize
 import sklearn.metrics
 from tqdm.auto import tqdm
@@ -86,6 +87,7 @@ class ML_Pcoord:
                 then cols are just the n features, start with just feat_w min then
                 if needed can incorporate iter min but would weight each row so might
                 not be needed or might not even help.
+                Use trace for labeling still?
 
         Parameters
         ----------
@@ -209,10 +211,10 @@ class ML_Pcoord:
 
         # then take the iter weighted average of the feature weighted condensed array
         # this is the final weighted scores
-        seg_scores = np.average(feat_weighted, weights=iter_w, axis=1)
+        self.seg_scores = np.average(feat_weighted, weights=iter_w, axis=1)
         
         # calc rocauc value and return the negative (min negative to maximize rocauc)
-        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, seg_scores)
+        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, self.seg_scores)
         return -rocauc
 
     def iter_f(self, iter_w, feat_w):
@@ -253,7 +255,7 @@ class ML_Pcoord:
         """
         return self.calc_loss(iter_w, feat_w)
 
-    def optimize_pcoord(self, recycle=3):
+    def optimize_pcoord(self, recycle=3, plot=False):
         """
         Main public class method
         ------------------------
@@ -265,6 +267,8 @@ class ML_Pcoord:
         ----------
         recycle : int
             Number of rounds or cycles of iter then feat minimization.
+        plot : bool
+            Whether or not to plot the roc curve.
 
         Returns
         -------
@@ -292,15 +296,21 @@ class ML_Pcoord:
         feat_bounds = tuple((0,1) for _ in range(self.n_features))
 
         # implement equality constraint (equals 0): sum of output array = 1
-        #constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
-        constraints = None
+        constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
+        #constraints = None
         
+        if plot:
+            fig, ax = plt.subplots()
+
         # repeat iter then feat weight minimization n times
         for cycle in range(recycle):
             # eps = step size used for estimation of jacobian in minimization
             # eps must be large enough to get out of local mimima for SLSQP
             # gradually decrease step size per cycle
-            options = {"eps": 10**-cycle}
+            #options = {"eps": 10**-cycle}
+            options = {"eps": 1**(-8+cycle)}
+            # default
+            #options = {"eps": 1.4901161193847656e-08}
 
             # first optimize iteration weights
             # SLSQP local minimization method for each scalar in output array 
@@ -327,8 +337,31 @@ class ML_Pcoord:
             print("-------------------------------------------------------------------")
             print(f"CYCLE: {cycle} | ITER LOSS: {-iter_loss} | FEAT LOSS: {-feat_loss}")
             print("-------------------------------------------------------------------")
+            if plot:
+                fpr, tpr, thresholds = sklearn.metrics.roc_curve(self.seg_labels,
+                                                                 self.seg_scores)
+                self.plot_roc_curve(fpr, tpr, -feat_loss, ax)
 
+        if plot:
+            plt.show()
         return iter_w, feat_w
+
+    def plot_roc_curve(self, x, y, score, ax=None):
+        """
+        Function for plotting the reciever operator characteristic curve in 2-D 
+        with the X axis as the false positive rate and the y axis as the true 
+        positive rate.
+        """
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = plt.gcf()
+        ax.plot(x, y, label=f"ROC: {score}")
+        ax.plot([0, 1], [0, 1], color="k", linestyle="--")
+        ax.set_xlabel("False Positive Rate")
+        ax.set_ylabel("True Positive Rate")
+        ax.set_title("Receiver Operating Characteristic (ROC) Curve")
+        ax.legend()
 
 # eventually for optimized weight tracking, make dict of aux names
 # so that you can output which features or iterations have what weight
@@ -338,7 +371,7 @@ if __name__ == "__main__":
     # ml.create_ml_input(savefile="ml_input.tsv")
 
     ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
-    iw, fw = ml.optimize_pcoord()
+    iw, fw = ml.optimize_pcoord(plot=True, recycle=3)
     print(fw)
 
     #print(np.loadtxt("X_ml_input.tsv").shape)
