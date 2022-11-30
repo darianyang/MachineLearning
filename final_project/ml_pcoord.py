@@ -16,7 +16,7 @@ import sys
 np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
-    def __init__(self, h5="data/ctd_ub_1d_v00.h5", last_iter=137, ml_input=None, seg_labels=None):
+    def __init__(self, h5="data/ctd_ub_1d_v00.h5", last_iter=160, ml_input=None, seg_labels=None):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
@@ -76,6 +76,21 @@ class ML_Pcoord:
             path.append((it,wlk))
         return np.array(sorted(path, key=lambda x: x[0]))
 
+    def w_succ(self):
+        """
+        Find and return all successfully recycled (iter, seg) pairs.
+        """
+        succ = []
+        for iter in range(self.last_iter):
+            # if the new_weights group exists in the h5 file
+            if f"iterations/iter_{iter:08d}/new_weights" in self.h5:
+                prev_segs = self.h5[f"iterations/iter_{iter:08d}/new_weights/index"]["prev_seg_id"]
+                # append the previous iter and previous seg id recycled
+                for seg in prev_segs:
+                    succ.append((iter-1, seg))
+        # TODO: order this by iter and seg vals? currently segs not sorted
+        return succ
+            
     def create_ml_input(self, label_space=["pcoord_0", "gt", 37], savefile=None):
         """
         Need a dataset from west.h5 as follows:
@@ -87,14 +102,21 @@ class ML_Pcoord:
                 then cols are just the n features, start with just feat_w min then
                 if needed can incorporate iter min but would weight each row so might
                 not be needed or might not even help.
-                Use trace for labeling still?
+                Use trace for labeling still? if in iter,seg in trace_path mark as True
+                So only trace the feature determining label space.
+                Maybe save the trace paths of all recycled trajectories and use these as 
+                the reference for which iter,seg to label as successful
+                This could be an alternative to using the label_space to set it more manually
+                    e.g. for a WE with no recycling, so basically w_succ for equilWE
+        TODO: add --first_iter arg to cut out the initial non-important iter segs
+        TODO: scale this data after calculating the ∆values
 
         Parameters
         ----------
         label_space : list
             List of 3 elements: [(feat_name), (gt or lt), (float or int)]
             This determines which segments are labeled as True.
-            e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be general)
+            e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be general and multi-dim)
                  every seg with pcoord_0 value > 37 will be counted as True.
         savefile : str
             Optional path to save the output ml_input array as a tsv.
@@ -289,7 +311,8 @@ class ML_Pcoord:
         feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
         # random vs uniform initial guess array?
         #feat_w = np.random.dirichlet(np.ones(self.n_features),size=1).reshape(-1)
-        print("Original Weights:", feat_w)
+        #print("Original Feature Weights:", feat_w)
+        #print("Original Iteration Weights:", iter_w)
 
         # implement bounds for each scalar in output array (0-1)
         iter_bounds = tuple((0,1) for _ in range(self.last_iter))
@@ -307,12 +330,17 @@ class ML_Pcoord:
             # eps = step size used for estimation of jacobian in minimization
             # eps must be large enough to get out of local mimima for SLSQP
             # gradually decrease step size per cycle
-            #options = {"eps": 10**-cycle}
-            options = {"eps": 1**(-8+cycle)}
+            options = {"eps": 10**-cycle}
+            #options = {"eps": 1**(-8+cycle)}
             # default
             #options = {"eps": 1.4901161193847656e-08}
 
-            # first optimize iteration weights
+            print("--------------------------------------------")
+            print(f"CYCLE: {cycle} | LOSS: {-self.calc_loss(iter_w, feat_w)}")
+            #print(f"CYCLE: {cycle} | FEAT LOSS: {-feat_loss}")
+            print("--------------------------------------------")
+
+            # first optimize iteration weights (not optimizing for now)
             # SLSQP local minimization method for each scalar in output array 
             iter_min = scipy.optimize.minimize(self.iter_f, iter_w, 
                                                constraints=constraints, args=(feat_w),
@@ -334,9 +362,10 @@ class ML_Pcoord:
             # var to compare each scoring function
             feat_loss = feat_min.fun
 
-            print("-------------------------------------------------------------------")
+            print("--------------------------------------------")
             print(f"CYCLE: {cycle} | ITER LOSS: {-iter_loss} | FEAT LOSS: {-feat_loss}")
-            print("-------------------------------------------------------------------")
+            #print(f"CYCLE: {cycle} | FEAT LOSS: {-feat_loss}")
+            print("--------------------------------------------")
             if plot:
                 fpr, tpr, thresholds = sklearn.metrics.roc_curve(self.seg_labels,
                                                                  self.seg_scores)
@@ -367,11 +396,15 @@ class ML_Pcoord:
 # so that you can output which features or iterations have what weight
 
 if __name__ == "__main__":
-    # ml = ML_Pcoord()
+    ml = ML_Pcoord()
+    succ = ml.w_succ()
+    print(succ)
+
     # ml.create_ml_input(savefile="ml_input.tsv")
 
-    ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
-    iw, fw = ml.optimize_pcoord(plot=True, recycle=3)
-    print(fw)
+    # ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
+    # iw, fw = ml.optimize_pcoord(plot=False, recycle=1)
+    # plt.plot(iw)
+    # plt.show()
 
     #print(np.loadtxt("X_ml_input.tsv").shape)
