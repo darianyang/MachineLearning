@@ -82,6 +82,10 @@ class ML_Pcoord:
             so if --last-iter is 100 and has 127 segments, 127 rows
         cols: 1 for each ∆iteration, last_frame - first_frame, with col for each feature
             so n iteations by n features
+        # TODO: actually, try rows as every segment from each iteration ∆values
+                then cols are just the n features, start with just feat_w min then
+                if needed can incorporate iter min but would weight each row so might
+                not be needed or might not even help.
 
         Parameters
         ----------
@@ -278,8 +282,9 @@ class ML_Pcoord:
 
         # get constant starting weights
         iter_w = np.array([1/self.last_iter for _ in range(self.last_iter)])
-        #feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
-        feat_w = np.random.dirichlet(np.ones(self.n_features),size=1).reshape(-1)
+        feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
+        # random vs uniform initial guess array?
+        #feat_w = np.random.dirichlet(np.ones(self.n_features),size=1).reshape(-1)
         print("Original Weights:", feat_w)
 
         # implement bounds for each scalar in output array (0-1)
@@ -287,16 +292,13 @@ class ML_Pcoord:
         feat_bounds = tuple((0,1) for _ in range(self.n_features))
 
         # implement equality constraint (equals 0): sum of output array = 1
-        constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
-
-        # eps = step size used for estimation of jacobian in minimization
-        # eps must be large enough to get out of local mimima for SLSQP
-        # TODO: do something like stochastic GD where there is a variety of step sizes
-        #options = {"eps": 1.4901161193847656e-08}
-        #options = {"eps": 1}
+        #constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
+        constraints = None
         
         # repeat iter then feat weight minimization n times
         for cycle in range(recycle):
+            # eps = step size used for estimation of jacobian in minimization
+            # eps must be large enough to get out of local mimima for SLSQP
             # gradually decrease step size per cycle
             options = {"eps": 10**-cycle}
 
