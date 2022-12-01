@@ -9,6 +9,7 @@ import h5py
 import matplotlib.pyplot as plt
 import scipy.optimize
 import sklearn.metrics
+import sklearn.preprocessing
 from tqdm.auto import tqdm
 import sys
 
@@ -16,11 +17,12 @@ import sys
 np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
-    def __init__(self, h5="data/ctd_ub_1d_v00.h5", first_iter=1, last_iter=160,
+    def __init__(self, h5="data/ctd_ub_1d_v00.h5", first_iter=10, last_iter=160,
                  ml_input=None, seg_labels=None):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
+        # TODO: option to skip certain auxdata features (e.g. secondary structure)
         Parameters
         ----------
         h5 : str
@@ -30,7 +32,6 @@ class ML_Pcoord:
         last_iter : int
             The upper bound iteration to consider for data extraction.
             Using 160 based on the ctd_ub_1d_v00 dataset. (TODO: update to be general)
-        # TODO: option to skip certain auxdata features (e.g. secondary structure)
         ml_input : str
             Path to input data file if already made, if present, does not generate new ml_input.
             Must also have seg_labels input file.
@@ -45,10 +46,10 @@ class ML_Pcoord:
         self.ml_input = ml_input
         self.seg_labels = seg_labels
 
-        # n segments per iteration
+        # n segments per all iterations
         self.n_particles = self.h5["summary"]["n_particles"]
-        # for the specfied iteration
-        self.segs_in_last = self.n_particles[last_iter-1]
+        # for the specfied iterations
+        self.total_segs = np.sum(self.n_particles[self.first_iter-1:self.last_iter])
 
         # save tau value (columns of pcoord array)
         self.tau = np.atleast_3d(np.array(self.h5[f"iterations/iter_{last_iter:08d}/pcoord"])).shape[1]
@@ -97,7 +98,7 @@ class ML_Pcoord:
         # TODO: order this by iter and seg vals? currently segs not sorted
         return succ
             
-    def create_ml_input(self, label_space=["pcoord_0", "gt", 37], savefile=None):
+    def create_ml_input(self, label_space=None, savefile=None):
         """
         Need a dataset from west.h5 as follows:
         rows: 1 for each segment of --last-iter, traced back to bstate to rep each iteration
@@ -114,8 +115,7 @@ class ML_Pcoord:
                 the reference for which iter,seg to label as successful
                 This could be an alternative to using the label_space to set it more manually
                     e.g. for a WE with no recycling, so basically w_succ for equilWE
-        TODO: add --first_iter arg to cut out the initial non-important iter segs
-        TODO: scale this data after calculating the ∆values
+        TODO: implement --first_iter arg to cut out the initial non-important iter segs
 
         Parameters
         ----------
@@ -124,6 +124,7 @@ class ML_Pcoord:
             This determines which segments are labeled as True.
             e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be general and multi-dim)
                  every seg with pcoord_0 value > 37 will be counted as True.
+            With None, use the recycled trajectories from west.h5.
         savefile : str
             Optional path to save the output ml_input array as a tsv.
             Saves the features as X_{savefile} and classifications as y_{savefile}.
@@ -136,26 +137,56 @@ class ML_Pcoord:
             Array of binary labels with successful trajectories as True.
         """
         # initialize empty but correctly shaped array
-        ml_input = np.zeros((self.segs_in_last, self.last_iter * self.n_features))
-        # as expected, it is 24 by (137i * (47 aux + 2 pcoord) features) = 6713 rows
+        # rows are segs for each iter in specified range, cols are n_features
+        ml_input = np.zeros((self.total_segs, self.n_features))
 
         # 1d empty array for binary y labels
-        seg_labels = np.zeros((self.segs_in_last))
+        seg_labels = np.zeros((self.total_segs))
 
-        ### fill the empty array ###
-        # loop each segment index of the last_iter choosen
-        for seg_i in tqdm(range(self.segs_in_last), desc="Creating input array"):
-            # get trace path back to bstate
-            trace = self.trace_walker((self.last_iter, seg_i))
+        # TODO: right now label_space is not ready for use: previous code:
+            # matching the input feature name for label cutoff
+            # if feat == label_space[0]:
+            #     # if a certain cutoff is met, set label as true (1), otherwise false (0)
+            #     if label_space[1] == "gt":
+            #         if np.any(it_wlk_feat_data[:,feat_depth] > label_space[2]):
+            #             label = 1
+            #     elif label_space[1] == "lt":
+            #         if np.any(it_wlk_feat_data[:,feat_depth] < label_space[2]):
+            #             label = 1
+            #     else:
+            #         raise ValueError(f"label_space[1] must be 'gt' or 'lt', not {label_space[1]}")
+        # find list of successfully recycled trajectories: (iter,seg) pairs
+        if label_space is None:
+            succ_traces = []
+            succ_pairs = self.w_succ()
+            # TODO: incorporate last and first iter
+            # make an array for all succ (iter,seg) traced paths
+            for pair in succ_pairs:
+                # filter for only iterations considered
+                if pair[0] >= self.first_iter and pair[0] <= self.last_iter:
+                    trace = self.trace_walker(pair)
+                    # need to filter the trace up to specified first_iter
+                    trace = trace[self.first_iter-1:]
+                    succ_traces.append(trace)
 
-            # for labeling as T or F, start as F
-            label = 0
+            # unique (iter,seg) pairs from each trace of each succ_traj (iter,seg) pair
+            succ_traces = np.unique(np.concatenate(succ_traces), axis=0)
+        else:
+            raise ValueError("label_space arg is not working yet...")
 
-            # take trace path and loop each (it, wlk) item (begins at i1)
-            for it, wlk in trace:
+        # overall seg row count
+        seg_n = 0
+        # loop each specified iteration and walker pair to fill array
+        for it in tqdm(range(self.first_iter, self.last_iter-1), desc="Creating input array"):
+            for wlk in range(self.n_particles[it - 1]):
+                # labeling as T if apart of succ traj paths
+                if [it, wlk] in succ_traces:
+                    label = 1
+                else:
+                    label = 0
+
                 # loop each feature name
                 for feat_i, feat in enumerate(self.feat_names):
-                    
                     # need to account for pcoords before auxdata
                     if feat[:-2] == "pcoord":
                         feat_name = "pcoord"
@@ -173,27 +204,20 @@ class ML_Pcoord:
                         # (if tau=11) goes from row to column (1, 11) to (11, 1); pcoord is (11, n)
                         it_wlk_feat_data = it_wlk_feat_data.reshape(self.tau, 1)
 
-                    # matching the input feature name for label cutoff
-                    if feat == label_space[0]:
-                        # if a certain cutoff is met, set label as true (1), otherwise false (0)
-                        if label_space[1] == "gt":
-                            if np.any(it_wlk_feat_data[:,feat_depth] > label_space[2]):
-                                label = 1
-                        elif label_space[1] == "lt":
-                            if np.any(it_wlk_feat_data[:,feat_depth] < label_space[2]):
-                                label = 1
-                        else:
-                            raise ValueError(f"label_space[1] must be 'gt' or 'lt', not {label_space[1]}")
-
                     # ∆feat = |last frame - first frame|
                     d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
-                                         it_wlk_feat_data[:, feat_depth][0])
+                                        it_wlk_feat_data[:, feat_depth][0])
 
-                    # assign values of ml_input array (row=seg_i, col=feat_i+((it-1)*n_features))
-                    ml_input[seg_i, feat_i + ((it - 1) * self.n_features)] = d_feat
+                    # assign values of ml_input array
+                    ml_input[seg_n, feat_i] = d_feat
 
-            # label the segment
-            seg_labels[seg_i] = label
+                # label the segment
+                seg_labels[seg_n] = label
+                # iterate the overall row number
+                seg_n += 1
+
+        # standardize
+        ml_input = sklearn.preprocessing.StandardScaler().fit_transform(ml_input)
 
         # optionally save to file
         if savefile:
@@ -341,10 +365,10 @@ class ML_Pcoord:
             # default
             #options = {"eps": 1.4901161193847656e-08}
 
-            print("--------------------------------------------")
-            print(f"CYCLE: {cycle} | LOSS: {-self.calc_loss(iter_w, feat_w)}")
+            #print("--------------------------------------------")
+            #print(f"CYCLE: {cycle} | LOSS: {-self.calc_loss(iter_w, feat_w)}")
             #print(f"CYCLE: {cycle} | FEAT LOSS: {-feat_loss}")
-            print("--------------------------------------------")
+            #print("--------------------------------------------")
 
             # first optimize iteration weights (not optimizing for now)
             # SLSQP local minimization method for each scalar in output array 
@@ -368,6 +392,7 @@ class ML_Pcoord:
             # var to compare each scoring function
             feat_loss = feat_min.fun
 
+            print(feat_min)
             print("--------------------------------------------")
             print(f"CYCLE: {cycle} | ITER LOSS: {-iter_loss} | FEAT LOSS: {-feat_loss}")
             #print(f"CYCLE: {cycle} | FEAT LOSS: {-feat_loss}")
@@ -402,15 +427,21 @@ class ML_Pcoord:
 # so that you can output which features or iterations have what weight
 
 if __name__ == "__main__":
-    ml = ML_Pcoord()
-    succ = ml.w_succ()
-    print(succ)
+    # ml = ML_Pcoord()
+    # succ = ml.w_succ()
+    # print(succ)
 
+    # ml = ML_Pcoord(first_iter=10)
     # ml.create_ml_input(savefile="ml_input.tsv")
 
-    # ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
-    # iw, fw = ml.optimize_pcoord(plot=False, recycle=1)
-    # plt.plot(iw)
+    # X = np.loadtxt("X_ml_input.tsv")
+    # y = np.loadtxt("y_ml_input.tsv")
+    # # i10-160 = 48 True segs / 3624
+    # print(np.count_nonzero(y==0))
+    # plt.plot(X[120])
     # plt.show()
 
-    #print(np.loadtxt("X_ml_input.tsv").shape)
+    ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
+    iw, fw = ml.optimize_pcoord(plot=False, recycle=1)
+    # plt.plot(iw)
+    # plt.show()
