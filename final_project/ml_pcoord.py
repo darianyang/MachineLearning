@@ -159,7 +159,6 @@ class ML_Pcoord:
         if label_space is None:
             succ_traces = []
             succ_pairs = self.w_succ()
-            # TODO: incorporate last and first iter
             # make an array for all succ (iter,seg) traced paths
             for pair in succ_pairs:
                 # filter for only iterations considered
@@ -180,7 +179,9 @@ class ML_Pcoord:
         for it in tqdm(range(self.first_iter, self.last_iter-1), desc="Creating input array"):
             for wlk in range(self.n_particles[it - 1]):
                 # labeling as T if apart of succ traj paths
-                if [it, wlk] in succ_traces:
+                # TODO: testing labeling only recycle (iter,seg) or whole trace
+                #if [it, wlk] in succ_traces:
+                if (it, wlk) in succ_pairs:
                     label = 1
                 else:
                     label = 0
@@ -227,7 +228,7 @@ class ML_Pcoord:
         # TODO: may need to reshape the seg_labels
         return ml_input, seg_labels
 
-    def calc_loss(self, iter_w, feat_w):
+    def loss_f(self, feat_w):
         """
         A score calculation method for min objective functions.
         TODO: eventually can try other segment scoring (e.g. rank instead of average)
@@ -235,8 +236,6 @@ class ML_Pcoord:
 
         Parameters
         ----------
-        iter_w : 1d array
-            Weights for each iteration.
         feat_w : 1d array
             Weights for each feature.
 
@@ -246,68 +245,29 @@ class ML_Pcoord:
             -ROCAUC score using the input weights.
             Negative since being minimized, here ROCAUC must be maximized.
         """
-        # map set of n_features for each iter to n_iter scores using feat_w weights
-        # ml_input (n_segs rows and n_iters * n_features cols) --> n_segs rows and n_iters cols
-        # first make a new array of the feature weighted ∆values of ml_input
-        feat_weighted = np.zeros((self.segs_in_last, self.last_iter))
+        # calc feature weighted ∆values of ml_input
+        self.feat_weighted = np.average(self.ml_input, weights=feat_w, axis=1)
 
-        #for each iteration, weight the feature set and get a score
-        for iter in range(self.last_iter):
-            # weights per column, which are the features/auxnames
-            # apply feature weights and get weighted average per row/seg
-            feat_w_scores = \
-                np.average(self.ml_input[:, iter * self.n_features:(iter + 1) * self.n_features], 
-                           weights=feat_w, axis=1)
-            # fill feat_weighted array with the feature weighted average
-            feat_weighted[:,iter] = feat_w_scores
-
-        # then take the iter weighted average of the feature weighted condensed array
-        # this is the final weighted scores
-        self.seg_scores = np.average(feat_weighted, weights=iter_w, axis=1)
+        # TODO: testing adding random noise
+        # 0 is the mean of the normal distribution you are choosing from
+        # 1 is the standard deviation of the normal distribution
+        # 100 is the number of elements you get in array noise
+        self.feat_weighted = self.feat_weighted * np.random.normal(np.average(self.feat_weighted),
+                                                                   np.std(self.feat_weighted),
+                                                                   self.feat_weighted.shape[0])
         
         # calc rocauc value and return the negative (min negative to maximize rocauc)
-        rocauc = sklearn.metrics.roc_auc_score(self.seg_labels, self.seg_scores)
-        return -rocauc
+        score = sklearn.metrics.roc_auc_score(self.seg_labels, self.feat_weighted)
+        return -score
 
-    def iter_f(self, iter_w, feat_w):
+    def constraint_f(self, w):
         """
-        Objective function to be minimized for iteration weight optimization.
-
-        Parameters
-        ----------
-        iter_w : 1d array
-            Weights to be optimized for each iteration.
-            (minimization variable)
-        feat_w : 1d array
-            Static weights for each feature.
-
-        Returns
-        -------
-        score : float
-            Single float depending on the scoring metric used.
+        Sum weights to 1.
+        TODO: change to lambda
         """
-        return self.calc_loss(iter_w, feat_w)
+        return np.sum(w)
 
-    def feat_f(self, feat_w, iter_w):
-        """
-        Objective function to be minimized for feature weight optimization.
-
-        Parameters
-        ----------
-        feat_w : 1d array
-            Weights to be optimized for each feature.
-            (minimization variable)
-        iter_w : 1d array
-            Static weights for each iteration.
-
-        Returns
-        -------
-        score : float
-            Single float depending on the scoring metric used.
-        """
-        return self.calc_loss(iter_w, feat_w)
-
-    def optimize_pcoord(self, recycle=3, plot=False):
+    def optimize_pcoord(self, recycle=1, plot=False):
         """
         Main public class method
         ------------------------
@@ -337,7 +297,6 @@ class ML_Pcoord:
             self.seg_labels = np.loadtxt(self.seg_labels)
 
         # get constant starting weights
-        iter_w = np.array([1/self.last_iter for _ in range(self.last_iter)])
         feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
         # random vs uniform initial guess array?
         #feat_w = np.random.dirichlet(np.ones(self.n_features),size=1).reshape(-1)
@@ -345,12 +304,11 @@ class ML_Pcoord:
         #print("Original Iteration Weights:", iter_w)
 
         # implement bounds for each scalar in output array (0-1)
-        iter_bounds = tuple((0,1) for _ in range(self.last_iter))
         feat_bounds = tuple((0,1) for _ in range(self.n_features))
 
         # implement equality constraint (equals 0): sum of output array = 1
-        constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
-        #constraints = None
+        #constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
+        #constraints = scipy.optimize.NonlinearConstraint(lambda x: np.sum(x), -np.inf, 1)
         
         if plot:
             fig, ax = plt.subplots()
@@ -360,33 +318,30 @@ class ML_Pcoord:
             # eps = step size used for estimation of jacobian in minimization
             # eps must be large enough to get out of local mimima for SLSQP
             # gradually decrease step size per cycle
-            options = {"eps": 10**-cycle}
+            #options = {"eps": 10**-cycle}
             #options = {"eps": 1**(-8+cycle)}
             # default
             #options = {"eps": 1.4901161193847656e-08}
 
-            #print("--------------------------------------------")
-            #print(f"CYCLE: {cycle} | LOSS: {-self.calc_loss(iter_w, feat_w)}")
-            #print(f"CYCLE: {cycle} | FEAT LOSS: {-feat_loss}")
-            #print("--------------------------------------------")
-
-            # first optimize iteration weights (not optimizing for now)
-            # SLSQP local minimization method for each scalar in output array 
-            iter_min = scipy.optimize.minimize(self.iter_f, iter_w, 
-                                               constraints=constraints, args=(feat_w),
-                                               bounds=iter_bounds, options=options)
-            
-            # set new weights var to be output array of minimization
-            iter_w = iter_min.x
-            # var to compare each scoring function
-            iter_loss = iter_min.fun
+            print("--------------------------------------------")
+            print(f"CYCLE: {cycle} | PRE LOSS: {-self.loss_f(feat_w)}")
+            print("--------------------------------------------")
+            if plot:
+                fpr, tpr, thresholds = sklearn.metrics.roc_curve(self.seg_labels,
+                                                                 self.feat_weighted)
+                self.plot_roc_curve(fpr, tpr, -self.loss_f(feat_w), ax)
 
             # then optimize feature weighs using optimized iteration weights
             # SLSQP local minimization method for each scalar in output array 
-            feat_min = scipy.optimize.minimize(self.feat_f, feat_w, 
-                                               constraints=constraints, args=(iter_w),
-                                               bounds=feat_bounds, options=options)
-            
+            # feat_min = scipy.optimize.minimize(self.loss_f, feat_w, 
+            #                                    constraints=constraints,
+            #                                    bounds=feat_bounds, options=options)
+
+            # the function isn't smooth so trying a stochastic minimization (non-gradient based)
+            feat_min = scipy.optimize.differential_evolution(self.loss_f, x0=feat_w, 
+                                                             #constraints=constraints,
+                                                             bounds=feat_bounds, maxiter=10)
+
             # set new weights var to be output array of minimization
             feat_w = feat_min.x
             # var to compare each scoring function
@@ -394,17 +349,16 @@ class ML_Pcoord:
 
             print(feat_min)
             print("--------------------------------------------")
-            print(f"CYCLE: {cycle} | ITER LOSS: {-iter_loss} | FEAT LOSS: {-feat_loss}")
-            #print(f"CYCLE: {cycle} | FEAT LOSS: {-feat_loss}")
+            print(f"CYCLE: {cycle} | POST LOSS: {-feat_loss}")
             print("--------------------------------------------")
             if plot:
                 fpr, tpr, thresholds = sklearn.metrics.roc_curve(self.seg_labels,
-                                                                 self.seg_scores)
+                                                                 self.feat_weighted)
                 self.plot_roc_curve(fpr, tpr, -feat_loss, ax)
 
         if plot:
             plt.show()
-        return iter_w, feat_w
+        return feat_w
 
     def plot_roc_curve(self, x, y, score, ax=None):
         """
@@ -436,12 +390,21 @@ if __name__ == "__main__":
 
     # X = np.loadtxt("X_ml_input.tsv")
     # y = np.loadtxt("y_ml_input.tsv")
-    # # i10-160 = 48 True segs / 3624
+    # i10-160 = 61 True segs / 3624 for traced succ label True
+    #print(np.count_nonzero(y))
+
+    # # i10-160 = 48 True segs / 3624 for traced succ label True
     # print(np.count_nonzero(y==0))
     # plt.plot(X[120])
     # plt.show()
 
     ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
-    iw, fw = ml.optimize_pcoord(plot=False, recycle=1)
-    # plt.plot(iw)
-    # plt.show()
+    names = np.array(ml.feat_names)
+    fw = ml.optimize_pcoord(plot=True, recycle=1)
+    plt.plot(fw)
+    plt.show()
+
+    top = np.argpartition(fw, -10)[-10:]
+    print(top)
+    print(names[top])
+    print("weights:", fw[top])
