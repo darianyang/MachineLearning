@@ -16,7 +16,8 @@ import sys
 np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
-    def __init__(self, h5="data/ctd_ub_1d_v00.h5", last_iter=160, ml_input=None, seg_labels=None):
+    def __init__(self, h5="data/ctd_ub_1d_v00.h5", first_iter=1, last_iter=160,
+                 ml_input=None, seg_labels=None):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
@@ -24,9 +25,11 @@ class ML_Pcoord:
         ----------
         h5 : str
             Path to west.h5 file. (TODO: update to be general)
+        first_iter : int
+            The lower bound iteration to consider for data extraction.
         last_iter : int
-            The iteration to consider for data extraction.
-            Using 137 based on the ctd_ub_1d_v00 dataset. (TODO: update to be general)
+            The upper bound iteration to consider for data extraction.
+            Using 160 based on the ctd_ub_1d_v00 dataset. (TODO: update to be general)
         # TODO: option to skip certain auxdata features (e.g. secondary structure)
         ml_input : str
             Path to input data file if already made, if present, does not generate new ml_input.
@@ -37,6 +40,7 @@ class ML_Pcoord:
         """
         # import west.h5 data file
         self.h5 = h5py.File(h5, "r")
+        self.first_iter = first_iter
         self.last_iter = last_iter
         self.ml_input = ml_input
         self.seg_labels = seg_labels
@@ -55,7 +59,7 @@ class ML_Pcoord:
         n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{last_iter:08d}/pcoord"])).shape[2]
         self.n_features += n_pcoords
 
-        # get the names of each feature
+        # get the names of each feature (and multiple pcoords)
         self.feat_names = [f"pcoord_{dim}" for dim in range(n_pcoords)] + \
                            list(self.h5[f"iterations/iter_{last_iter:08d}/auxdata"])
 
@@ -79,6 +83,8 @@ class ML_Pcoord:
     def w_succ(self):
         """
         Find and return all successfully recycled (iter, seg) pairs.
+        TODO: eventually can use this to plot pdist of succ only trajs
+              note that I would have to norm by the overall pmax
         """
         succ = []
         for iter in range(self.last_iter):
