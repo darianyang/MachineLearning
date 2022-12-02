@@ -249,13 +249,19 @@ class ML_Pcoord:
         self.feat_weighted = np.average(self.ml_input, weights=feat_w, axis=1)
 
         # TODO: testing adding random noise
+        # note this should go into the input just once (outside of this method)
         # 0 is the mean of the normal distribution you are choosing from
         # 1 is the standard deviation of the normal distribution
         # 100 is the number of elements you get in array noise
-        self.feat_weighted = self.feat_weighted * np.random.normal(np.average(self.feat_weighted),
-                                                                   np.std(self.feat_weighted),
-                                                                   self.feat_weighted.shape[0])
-        
+        # self.feat_weighted *= np.random.normal(np.average(self.feat_weighted),
+        #                                                            np.std(self.feat_weighted),
+        #                                                            self.feat_weighted.shape[0])
+
+        # maybe I can also use the full 100ps tau for columns and not use ∆values
+            # a more natural way to add "noise"
+
+        # also try time series test train split and eval with rocauc
+
         # calc rocauc value and return the negative (min negative to maximize rocauc)
         score = sklearn.metrics.roc_auc_score(self.seg_labels, self.feat_weighted)
         return -score
@@ -306,12 +312,19 @@ class ML_Pcoord:
         # implement bounds for each scalar in output array (0-1)
         feat_bounds = tuple((0,1) for _ in range(self.n_features))
 
+        # TODO: need to think about this, do I really need sum=1 constraint? Not necessarily
         # implement equality constraint (equals 0): sum of output array = 1
         #constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
         #constraints = scipy.optimize.NonlinearConstraint(lambda x: np.sum(x), -np.inf, 1)
         
         if plot:
             fig, ax = plt.subplots()
+
+        # TODO: add noise test:
+        # from Tiwary PIB paper, gaussian noise was added at 0.05 variance (sigma**2)= 0.05 stdev (sigma)
+        self.ml_input = np.multiply(self.ml_input, np.random.normal(np.average(self.ml_input), 
+                                                                    np.sqrt(0.05), # 0.22 
+                                                                    self.ml_input.shape[1]))
 
         # repeat iter then feat weight minimization n times
         for cycle in range(recycle):
@@ -338,6 +351,7 @@ class ML_Pcoord:
             #                                    bounds=feat_bounds, options=options)
 
             # the function isn't smooth so trying a stochastic minimization (non-gradient based)
+            # TODO: could go back in git and use diff evo opt on previous (wide) dataset - prob not worthwhile tho
             feat_min = scipy.optimize.differential_evolution(self.loss_f, x0=feat_w, 
                                                              #constraints=constraints,
                                                              bounds=feat_bounds, maxiter=10)
@@ -405,6 +419,8 @@ if __name__ == "__main__":
     plt.show()
 
     top = np.argpartition(fw, -10)[-10:]
-    print(top)
-    print(names[top])
-    print("weights:", fw[top])
+    #print(top)
+    #print(names[top])
+    #print("weights:", fw[top])
+    # sort by weight
+    print(sorted(zip(names[top], fw[top]), key=lambda t: t[1], reverse=True))
