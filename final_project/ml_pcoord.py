@@ -3,6 +3,7 @@ Some helper functions to create the initial dataset and run ML.
 TODO: Eventually, integrate into wedap.
 """
 
+from unittest import skip
 import numpy as np
 import h5py
 
@@ -17,32 +18,35 @@ import sys
 np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
-    def __init__(self, h5="data/ctd_ub_1d_v00.h5", first_iter=10, last_iter=160,
-                 ml_input=None, seg_labels=None):
+    def __init__(self, h5=None, first_iter=1, last_iter=None,
+                 ml_input=None, seg_labels=None, skip_feats=None):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
-        # TODO: option to skip certain auxdata features (e.g. secondary structure)
         Parameters
         ----------
         h5 : str
-            Path to west.h5 file. (TODO: update to be general)
+            Path to west.h5 file.
         first_iter : int
             The lower bound iteration to consider for data extraction.
         last_iter : int
             The upper bound iteration to consider for data extraction.
-            Using 160 based on the ctd_ub_1d_v00 dataset. (TODO: update to be general)
         ml_input : str
             Path to input data file if already made, if present, does not generate new ml_input.
             Must also have seg_labels input file.
         seg_labels : str
             Path to input label file if already made, if present, does not generate new seg_labels.
             Must also have ml_input input file.
+        skip_feats : list
+            List of str feature names to not include in ml_input dataset.
         """
         # import west.h5 data file
         self.h5 = h5py.File(h5, "r")
         self.first_iter = first_iter
-        self.last_iter = last_iter
+        if last_iter:
+            self.last_iter = last_iter
+        else:
+            self.last_iter = self.h5.attrs["west_current_iteration"] - 1
         self.ml_input = ml_input
         self.seg_labels = seg_labels
 
@@ -52,17 +56,22 @@ class ML_Pcoord:
         self.total_segs = np.sum(self.n_particles[self.first_iter-1:self.last_iter])
 
         # save tau value (columns of pcoord array)
-        self.tau = np.atleast_3d(np.array(self.h5[f"iterations/iter_{last_iter:08d}/pcoord"])).shape[1]
+        self.tau = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[1]
 
         # n features per iteration (must be constant for all iterations)
-        self.n_features = len(list(self.h5[f"iterations/iter_{last_iter:08d}/auxdata"]))
+        self.n_features = len(list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"]))
         # and every pcoord tracked (n depth)
-        n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{last_iter:08d}/pcoord"])).shape[2]
+        n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[2]
         self.n_features += n_pcoords
 
         # get the names of each feature (and multiple pcoords)
         self.feat_names = [f"pcoord_{dim}" for dim in range(n_pcoords)] + \
-                           list(self.h5[f"iterations/iter_{last_iter:08d}/auxdata"])
+                           list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"])
+
+        # optionally skip certain specified features (TODO)
+        if skip_feats:
+            self.skip_feats = skip_feats
+
 
     ### trace_walker and get_parents helper methods normally avail in wedap ###
     def get_parents(self, walker_tuple):
@@ -233,6 +242,9 @@ class ML_Pcoord:
         A score calculation method for min objective functions.
         TODO: eventually can try other segment scoring (e.g. rank instead of average)
               and other loss metrics, e.g. pROCAUC instead of ROCAUC.
+              Maybe use variation from wevo as the loss function
+              where variation of the system made by the distance matrix of all features (standardized)
+              preweighted before calculating distance matrix. Variation would be maximized.
 
         Parameters
         ----------
@@ -247,18 +259,6 @@ class ML_Pcoord:
         """
         # calc feature weighted ∆values of ml_input
         self.feat_weighted = np.average(self.ml_input, weights=feat_w, axis=1)
-
-        # TODO: testing adding random noise
-        # note this should go into the input just once (outside of this method)
-        # 0 is the mean of the normal distribution you are choosing from
-        # 1 is the standard deviation of the normal distribution
-        # 100 is the number of elements you get in array noise
-        # self.feat_weighted *= np.random.normal(np.average(self.feat_weighted),
-        #                                                            np.std(self.feat_weighted),
-        #                                                            self.feat_weighted.shape[0])
-
-        # maybe I can also use the full 100ps tau for columns and not use ∆values
-            # a more natural way to add "noise"
 
         # also try time series test train split and eval with rocauc
 
@@ -314,7 +314,7 @@ class ML_Pcoord:
 
         # TODO: need to think about this, do I really need sum=1 constraint? Not necessarily
         # implement equality constraint (equals 0): sum of output array = 1
-        #constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
+        constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
         #constraints = scipy.optimize.NonlinearConstraint(lambda x: np.sum(x), -np.inf, 1)
         
         if plot:
@@ -322,9 +322,14 @@ class ML_Pcoord:
 
         # TODO: add noise test:
         # from Tiwary PIB paper, gaussian noise was added at 0.05 variance (sigma**2)= 0.05 stdev (sigma)
-        self.ml_input = np.multiply(self.ml_input, np.random.normal(np.average(self.ml_input), 
-                                                                    np.sqrt(0.05), # 0.22 
-                                                                    self.ml_input.shape[1]))
+        # this was close to the initial weights
+        # self.ml_input = np.multiply(self.ml_input, np.random.normal(np.average(self.ml_input), 
+        #                                                             feat_w[0]/10,
+        #                                                             #np.sqrt(0.05), # 0.22 
+        #                                                             self.ml_input.shape[1]))
+        # TODO: maybe I can also use the full 100ps tau for columns and not use ∆values
+            # a more natural way to add "noise"
+
 
         # repeat iter then feat weight minimization n times
         for cycle in range(recycle):
@@ -333,6 +338,7 @@ class ML_Pcoord:
             # gradually decrease step size per cycle
             #options = {"eps": 10**-cycle}
             #options = {"eps": 1**(-8+cycle)}
+            options = {"eps": 1}
             # default
             #options = {"eps": 1.4901161193847656e-08}
 
@@ -346,15 +352,15 @@ class ML_Pcoord:
 
             # then optimize feature weighs using optimized iteration weights
             # SLSQP local minimization method for each scalar in output array 
-            # feat_min = scipy.optimize.minimize(self.loss_f, feat_w, 
-            #                                    constraints=constraints,
-            #                                    bounds=feat_bounds, options=options)
+            feat_min = scipy.optimize.minimize(self.loss_f, feat_w, 
+                                               constraints=constraints,
+                                               bounds=feat_bounds, options=options)
 
             # the function isn't smooth so trying a stochastic minimization (non-gradient based)
             # TODO: could go back in git and use diff evo opt on previous (wide) dataset - prob not worthwhile tho
-            feat_min = scipy.optimize.differential_evolution(self.loss_f, x0=feat_w, 
-                                                             #constraints=constraints,
-                                                             bounds=feat_bounds, maxiter=10)
+            # feat_min = scipy.optimize.differential_evolution(self.loss_f, x0=feat_w, 
+            #                                                  #constraints=constraints,
+            #                                                  bounds=feat_bounds, maxiter=10)
 
             # set new weights var to be output array of minimization
             feat_w = feat_min.x
@@ -395,11 +401,14 @@ class ML_Pcoord:
 # so that you can output which features or iterations have what weight
 
 if __name__ == "__main__":
-    # ml = ML_Pcoord()
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
     # succ = ml.w_succ()
     # print(succ)
 
-    # ml = ML_Pcoord(first_iter=10)
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", first_iter=10, last_iter=160)
+    # ml.create_ml_input(savefile="ml_input.tsv")
+
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
     # ml.create_ml_input(savefile="ml_input.tsv")
 
     # X = np.loadtxt("X_ml_input.tsv")
@@ -412,10 +421,10 @@ if __name__ == "__main__":
     # plt.plot(X[120])
     # plt.show()
 
-    ml = ML_Pcoord(ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
     names = np.array(ml.feat_names)
     fw = ml.optimize_pcoord(plot=True, recycle=1)
-    plt.plot(fw)
+    plt.scatter([i for i in range(fw.shape[0])], fw)
     plt.show()
 
     top = np.argpartition(fw, -10)[-10:]
