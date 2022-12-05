@@ -14,6 +14,8 @@ import sklearn.preprocessing
 from tqdm.auto import tqdm
 import sys
 
+plt.style.use("/Users/darian/github/wedap/wedap/styles/default.mplstyle")
+
 # Suppress divide-by-zero in log
 np.seterr(divide="ignore", invalid="ignore")
 
@@ -71,7 +73,10 @@ class ML_Pcoord:
         # optionally skip certain specified features (TODO)
         if skip_feats:
             self.skip_feats = skip_feats
-
+            # subtract the skipped feats from total n_features
+            self.n_features -= len(skip_feats)
+            # remove skipped feats from feature name list
+            self.feat_names = [i for i in self.feat_names if i not in self.skip_feats]
 
     ### trace_walker and get_parents helper methods normally avail in wedap ###
     def get_parents(self, walker_tuple):
@@ -107,7 +112,7 @@ class ML_Pcoord:
         # TODO: order this by iter and seg vals? currently segs not sorted
         return succ
             
-    def create_ml_input(self, label_space=None, savefile=None):
+    def create_ml_input(self, label_space=None, savefile=None, random=False):
         """
         Need a dataset from west.h5 as follows:
         rows: 1 for each segment of --last-iter, traced back to bstate to rep each iteration
@@ -137,6 +142,8 @@ class ML_Pcoord:
         savefile : str
             Optional path to save the output ml_input array as a tsv.
             Saves the features as X_{savefile} and classifications as y_{savefile}.
+        random : bool
+            Default False, if True, returns an output file of random values with 50/50 T/F labels.
 
         Returns
         -------
@@ -151,6 +158,10 @@ class ML_Pcoord:
 
         # 1d empty array for binary y labels
         seg_labels = np.zeros((self.total_segs))
+
+        # TODO: output a random dataset for testing the optimzation
+        if random:
+            pass
 
         # TODO: right now label_space is not ready for use: previous code:
             # matching the input feature name for label cutoff
@@ -260,18 +271,12 @@ class ML_Pcoord:
         # calc feature weighted ∆values of ml_input
         self.feat_weighted = np.average(self.ml_input, weights=feat_w, axis=1)
 
-        # also try time series test train split and eval with rocauc
+        # TODO: also try time series test train split and eval with rocauc
+        # note that splitting with equal weights in test and train may lead to better scores
 
         # calc rocauc value and return the negative (min negative to maximize rocauc)
         score = sklearn.metrics.roc_auc_score(self.seg_labels, self.feat_weighted)
         return -score
-
-    def constraint_f(self, w):
-        """
-        Sum weights to 1.
-        TODO: change to lambda
-        """
-        return np.sum(w)
 
     def optimize_pcoord(self, recycle=1, plot=False):
         """
@@ -306,8 +311,6 @@ class ML_Pcoord:
         feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
         # random vs uniform initial guess array?
         #feat_w = np.random.dirichlet(np.ones(self.n_features),size=1).reshape(-1)
-        #print("Original Feature Weights:", feat_w)
-        #print("Original Iteration Weights:", iter_w)
 
         # implement bounds for each scalar in output array (0-1)
         feat_bounds = tuple((0,1) for _ in range(self.n_features))
@@ -315,7 +318,7 @@ class ML_Pcoord:
         # TODO: need to think about this, do I really need sum=1 constraint? Not necessarily
         # implement equality constraint (equals 0): sum of output array = 1
         constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
-        #constraints = scipy.optimize.NonlinearConstraint(lambda x: np.sum(x), -np.inf, 1)
+        #constraints = scipy.optimize.NonlinearConstraint(lambda x: np.sum(x), 1, 1)
         
         if plot:
             fig, ax = plt.subplots()
@@ -330,25 +333,26 @@ class ML_Pcoord:
         # TODO: maybe I can also use the full 100ps tau for columns and not use ∆values
             # a more natural way to add "noise"
 
-
         # repeat iter then feat weight minimization n times
         for cycle in range(recycle):
             # eps = step size used for estimation of jacobian in minimization
             # eps must be large enough to get out of local mimima for SLSQP
             # gradually decrease step size per cycle
-            #options = {"eps": 10**-cycle}
+            options = {"eps": 10**-cycle}
             #options = {"eps": 1**(-8+cycle)}
-            options = {"eps": 1}
+            #options = {"eps": 1}
             # default
             #options = {"eps": 1.4901161193847656e-08}
 
-            print("--------------------------------------------")
-            print(f"CYCLE: {cycle} | PRE LOSS: {-self.loss_f(feat_w)}")
-            print("--------------------------------------------")
-            if plot:
-                fpr, tpr, thresholds = sklearn.metrics.roc_curve(self.seg_labels,
-                                                                 self.feat_weighted)
-                self.plot_roc_curve(fpr, tpr, -self.loss_f(feat_w), ax)
+            # only for first cycle
+            if cycle == 0:
+                print("--------------------------------------------")
+                print(f"CYCLE: {cycle} | PRE LOSS: {-self.loss_f(feat_w)}")
+                print("--------------------------------------------")
+                if plot:
+                    fpr, tpr, thresholds = sklearn.metrics.roc_curve(self.seg_labels,
+                                                                    self.feat_weighted)
+                    self.plot_roc_curve(fpr, tpr, -self.loss_f(feat_w), f"PRE | ", ax)
 
             # then optimize feature weighs using optimized iteration weights
             # SLSQP local minimization method for each scalar in output array 
@@ -356,8 +360,7 @@ class ML_Pcoord:
                                                constraints=constraints,
                                                bounds=feat_bounds, options=options)
 
-            # the function isn't smooth so trying a stochastic minimization (non-gradient based)
-            # TODO: could go back in git and use diff evo opt on previous (wide) dataset - prob not worthwhile tho
+            # the function may not be smooth so trying a stochastic minimization (non-gradient based)
             # feat_min = scipy.optimize.differential_evolution(self.loss_f, x0=feat_w, 
             #                                                  #constraints=constraints,
             #                                                  bounds=feat_bounds, maxiter=10)
@@ -367,49 +370,84 @@ class ML_Pcoord:
             # var to compare each scoring function
             feat_loss = feat_min.fun
 
-            print(feat_min)
+            #print(feat_min)
             print("--------------------------------------------")
             print(f"CYCLE: {cycle} | POST LOSS: {-feat_loss}")
             print("--------------------------------------------")
             if plot:
                 fpr, tpr, thresholds = sklearn.metrics.roc_curve(self.seg_labels,
                                                                  self.feat_weighted)
-                self.plot_roc_curve(fpr, tpr, -feat_loss, ax)
+                self.plot_roc_curve(fpr, tpr, -feat_loss, f"POST | ", ax)
 
         if plot:
+            fig.tight_layout()
             plt.show()
+            #plt.savefig("roc.png", dpi=300, transparent=True)
+        self.feat_w = feat_w
         return feat_w
 
-    def plot_roc_curve(self, x, y, score, ax=None):
+    def plot_roc_curve(self, x, y, score, label=None, ax=None):
         """
-        Function for plotting the reciever operator characteristic curve in 2-D 
-        with the X axis as the false positive rate and the y axis as the true 
-        positive rate.
+        Function for plotting the reciever operator characteristic curve 
+        with the X axis as the false positive rate and the y axis as the 
+        true positive rate.
         """
         if ax is None:
             fig, ax = plt.subplots()
         else:
             fig = plt.gcf()
-        ax.plot(x, y, label=f"ROC: {score}")
+        ax.plot(x, y, label=f"{label}ROC: {score:0.3f}")
         ax.plot([0, 1], [0, 1], color="k", linestyle="--")
         ax.set_xlabel("False Positive Rate")
         ax.set_ylabel("True Positive Rate")
-        ax.set_title("Receiver Operating Characteristic (ROC) Curve")
+        ax.set_title("Receiver Operating Characteristic (ROC) Curve", fontsize=16)
         ax.legend()
+    
+    def plot_weights(self, top_n=10, ax=None):
+        """
+        Function for plotting the optimized weights of each feature.
 
-# eventually for optimized weight tracking, make dict of aux names
-# so that you can output which features or iterations have what weight
+        Parameters
+        ----------
+        top : int
+            The amount of top features to return.
+        ax : mpl axes object
+        """
+        if ax is None:
+            fig, ax = plt.subplots()
+        else:
+            fig = plt.gcf()
+
+        ax.scatter([i for i in range(self.feat_w.shape[0])], self.feat_w)
+        ax.set_xlabel("Feature")
+        ax.set_ylabel("Weight")
+        ax.set_title("Weight per Feature")
+        fig.tight_layout()
+        #plt.savefig("weights.png", dpi=300, transparent=True)
+        #plt.show()
+
+        top = np.argpartition(fw, -top_n)[-top_n:]
+        
+        # sort by weight and return top n
+        return sorted(zip(names[top], fw[top]), key=lambda t: t[1], reverse=True)
+
 
 if __name__ == "__main__":
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
-    # succ = ml.w_succ()
-    # print(succ)
-
+    ### making a few datasets ###
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", first_iter=10, last_iter=160)
     # ml.create_ml_input(savefile="ml_input.tsv")
 
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
     # ml.create_ml_input(savefile="ml_input.tsv")
+
+    # without the pcoord_1 and min_dist datasets (which define the recycle boundary)
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
+    # ml.create_ml_input(savefile="ml_input_cut.tsv")
+
+    ### eda ###
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
+    # succ = ml.w_succ()
+    # print(succ)
 
     # X = np.loadtxt("X_ml_input.tsv")
     # y = np.loadtxt("y_ml_input.tsv")
@@ -421,15 +459,19 @@ if __name__ == "__main__":
     # plt.plot(X[120])
     # plt.show()
 
-    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
-    names = np.array(ml.feat_names)
-    fw = ml.optimize_pcoord(plot=True, recycle=1)
-    plt.scatter([i for i in range(fw.shape[0])], fw)
-    plt.show()
+    ### rocauc plot and opt all feats ###
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
+    # names = np.array(ml.feat_names)
+    # fw = ml.optimize_pcoord(plot=True, recycle=1)
+    # top = ml.plot_weights()
+    # print(top)
+    # plt.show()
 
-    top = np.argpartition(fw, -10)[-10:]
-    #print(top)
-    #print(names[top])
-    #print("weights:", fw[top])
-    # sort by weight
-    print(sorted(zip(names[top], fw[top]), key=lambda t: t[1], reverse=True))
+    ### rocauc plot and opt with skip_feats ###
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
+                   skip_feats=["pcoord_1", "min_dist"])
+    names = np.array(ml.feat_names)
+    fw = ml.optimize_pcoord(plot=False, recycle=1)
+    top = ml.plot_weights()
+    print(top)
+    plt.show()
