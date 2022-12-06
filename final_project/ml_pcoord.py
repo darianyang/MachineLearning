@@ -163,7 +163,10 @@ class ML_Pcoord:
         if random:
             pass
 
-        # TODO: right now label_space is not ready for use: previous code:
+        # TODO: right now label_space is not ready for use: 
+        #       I have to eventually set this up to be able to use not yet recycled and 
+        #       "assigned" space from label_space as True labels
+        # previous code:
             # matching the input feature name for label cutoff
             # if feat == label_space[0]:
             #     # if a certain cutoff is met, set label as true (1), otherwise false (0)
@@ -188,6 +191,8 @@ class ML_Pcoord:
                     trace = trace[self.first_iter-1:]
                     succ_traces.append(trace)
 
+            # TODO: if succ_traces is None:
+                # raise error "No successfull trajectories found, please input a label_space criterion"
             # unique (iter,seg) pairs from each trace of each succ_traj (iter,seg) pair
             succ_traces = np.unique(np.concatenate(succ_traces), axis=0)
         else:
@@ -196,10 +201,11 @@ class ML_Pcoord:
         # overall seg row count
         seg_n = 0
         # loop each specified iteration and walker pair to fill array
-        for it in tqdm(range(self.first_iter, self.last_iter-1), desc="Creating input array"):
+        for it in tqdm(range(self.first_iter, self.last_iter + 1), desc="Creating input array"):
             for wlk in range(self.n_particles[it - 1]):
-                # labeling as T if apart of succ traj paths
+                # labeling as True if apart of succ traj paths
                 # TODO: testing labeling only recycle (iter,seg) or whole trace
+                # only recycle seems to be better for now
                 #if [it, wlk] in succ_traces:
                 if (it, wlk) in succ_pairs:
                     label = 1
@@ -215,6 +221,7 @@ class ML_Pcoord:
                     else:
                         feat_name = f"auxdata/{feat}"
                         # TODO: eventually can account for multi depth dim auxdata
+                        # e.g. for a distance matrix (maybe W184 M1 to all M2 residues and vv)
                         feat_depth = 0
 
                     ### calc the ∆feat value of each feature of current (it, wlk) ###
@@ -237,15 +244,19 @@ class ML_Pcoord:
                 # iterate the overall row number
                 seg_n += 1
 
-        # standardize
-        ml_input = sklearn.preprocessing.StandardScaler().fit_transform(ml_input)
+        # standardize: actually, just norm should be fine since these are |∆values|
+        #ml_input = sklearn.preprocessing.StandardScaler().fit_transform(ml_input)
+        
+        # l2 is sum of squares norm, l1 is sum of abs vector values, max is maximum value norm
+        # for me, max value norm is most intuitive here
+        # normalizing each feature ∆value (axis=0)
+        ml_input = sklearn.preprocessing.normalize(ml_input, norm="max", axis=0)
 
         # optionally save to file
         if savefile:
             np.savetxt("X_" + savefile, ml_input, delimiter="\t")
             np.savetxt("y_" + savefile, seg_labels, delimiter="\t")
 
-        # TODO: may need to reshape the seg_labels
         return ml_input, seg_labels
 
     def loss_f(self, feat_w):
@@ -370,7 +381,7 @@ class ML_Pcoord:
             # var to compare each scoring function
             feat_loss = feat_min.fun
 
-            #print(feat_min)
+            print(feat_min)
             print("--------------------------------------------")
             print(f"CYCLE: {cycle} | POST LOSS: {-feat_loss}")
             print("--------------------------------------------")
@@ -426,36 +437,43 @@ class ML_Pcoord:
         #plt.savefig("weights.png", dpi=300, transparent=True)
         #plt.show()
 
-        top = np.argpartition(fw, -top_n)[-top_n:]
+        top = np.argpartition(self.feat_w, -top_n)[-top_n:]
         
         # sort by weight and return top n
-        return sorted(zip(names[top], fw[top]), key=lambda t: t[1], reverse=True)
+        return sorted(zip(np.array(self.feat_names)[top], self.feat_w[top]), key=lambda t: t[1], reverse=True)
 
 
 if __name__ == "__main__":
     ### making a few datasets ###
+    # this dataset didn't have good results, too easy of a classification problem
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", first_iter=10, last_iter=160)
     # ml.create_ml_input(savefile="ml_input.tsv")
 
+    # this was a better dataset, more variety of trajectories
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
     # ml.create_ml_input(savefile="ml_input.tsv")
-
+    
     # without the pcoord_1 and min_dist datasets (which define the recycle boundary)
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
-    # ml.create_ml_input(savefile="ml_input_cut.tsv")
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
+    ml.create_ml_input(savefile="ml_input_cut.tsv")
 
     ### eda ###
+    # find and output all successfull trajectories
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
     # succ = ml.w_succ()
     # print(succ)
 
+    # load dataset
     # X = np.loadtxt("X_ml_input.tsv")
     # y = np.loadtxt("y_ml_input.tsv")
-    # i10-160 = 61 True segs / 3624 for traced succ label True
+    
+    # count how many True
     #print(np.count_nonzero(y))
 
-    # # i10-160 = 48 True segs / 3624 for traced succ label True
+    # count how many False
     # print(np.count_nonzero(y==0))
+
+    # random dataset plot
     # plt.plot(X[120])
     # plt.show()
 
@@ -467,11 +485,12 @@ if __name__ == "__main__":
     # print(top)
     # plt.show()
 
-    ### rocauc plot and opt with skip_feats ###
+    ### rocauc plot and opt with skip_feats | also testing with and without std/norm ###
     ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
                    skip_feats=["pcoord_1", "min_dist"])
     names = np.array(ml.feat_names)
-    fw = ml.optimize_pcoord(plot=False, recycle=1)
-    top = ml.plot_weights()
+    fw = ml.optimize_pcoord(plot=True, recycle=1)
+    # seems like there are 6 non-near-zero features from the plot
+    top = ml.plot_weights(top_n=10)
     print(top)
     plt.show()
