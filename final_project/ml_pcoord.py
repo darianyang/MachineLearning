@@ -3,7 +3,6 @@ Some helper functions to create the initial dataset and run ML.
 TODO: Eventually, integrate into wedap.
 """
 
-from unittest import skip
 import numpy as np
 import h5py
 
@@ -114,22 +113,7 @@ class ML_Pcoord:
             
     def create_ml_input(self, label_space=None, savefile=None, random=False):
         """
-        Need a dataset from west.h5 as follows:
-        rows: 1 for each segment of --last-iter, traced back to bstate to rep each iteration
-            so if --last-iter is 100 and has 127 segments, 127 rows
-        cols: 1 for each ∆iteration, last_frame - first_frame, with col for each feature
-            so n iteations by n features
-        # TODO: actually, try rows as every segment from each iteration ∆values
-                then cols are just the n features, start with just feat_w min then
-                if needed can incorporate iter min but would weight each row so might
-                not be needed or might not even help.
-                Use trace for labeling still? if in iter,seg in trace_path mark as True
-                So only trace the feature determining label space.
-                Maybe save the trace paths of all recycled trajectories and use these as 
-                the reference for which iter,seg to label as successful
-                This could be an alternative to using the label_space to set it more manually
-                    e.g. for a WE with no recycling, so basically w_succ for equilWE
-        TODO: implement --first_iter arg to cut out the initial non-important iter segs
+        Generate ml dataset from west.h5.
 
         Parameters
         ----------
@@ -159,11 +143,10 @@ class ML_Pcoord:
         # 1d empty array for binary y labels
         seg_labels = np.zeros((self.total_segs))
 
-        # TODO: output a random dataset for testing the optimzation
-        if random:
-            pass
-
-        # TODO: right now label_space is not ready for use: previous code:
+        # TODO: right now label_space is not ready for use: 
+        #       I have to eventually set this up to be able to use not yet recycled and 
+        #       "assigned" space from label_space as True labels
+        # previous code:
             # matching the input feature name for label cutoff
             # if feat == label_space[0]:
             #     # if a certain cutoff is met, set label as true (1), otherwise false (0)
@@ -188,64 +171,82 @@ class ML_Pcoord:
                     trace = trace[self.first_iter-1:]
                     succ_traces.append(trace)
 
+            # TODO: if succ_traces is None:
+                # raise error "No successfull trajectories found, please input a label_space criterion"
             # unique (iter,seg) pairs from each trace of each succ_traj (iter,seg) pair
             succ_traces = np.unique(np.concatenate(succ_traces), axis=0)
         else:
             raise ValueError("label_space arg is not working yet...")
 
-        # overall seg row count
-        seg_n = 0
-        # loop each specified iteration and walker pair to fill array
-        for it in tqdm(range(self.first_iter, self.last_iter-1), desc="Creating input array"):
-            for wlk in range(self.n_particles[it - 1]):
-                # labeling as T if apart of succ traj paths
-                # TODO: testing labeling only recycle (iter,seg) or whole trace
-                #if [it, wlk] in succ_traces:
-                if (it, wlk) in succ_pairs:
-                    label = 1
-                else:
-                    label = 0
+        # TODO: output a random dataset for testing the optimzation
+        if random:
+            # make labels 50/50 T/F (back half of array as True (1))
+            seg_labels[(int(seg_labels.shape[0] / 2)):] = 1
 
-                # loop each feature name
-                for feat_i, feat in enumerate(self.feat_names):
-                    # need to account for pcoords before auxdata
-                    if feat[:-2] == "pcoord":
-                        feat_name = "pcoord"
-                        feat_depth = int(feat[-1:])
+            # put random values for ml_input
+            ml_input = np.random.rand(self.total_segs, self.n_features)
+
+        # otherwise make the ml_input array
+        else:
+            # overall seg row count
+            seg_n = 0
+            # loop each specified iteration and walker pair to fill array
+            for it in tqdm(range(self.first_iter, self.last_iter + 1), desc="Creating input array"):
+                for wlk in range(self.n_particles[it - 1]):
+                    # labeling as True if apart of succ traj paths
+                    # TODO: testing labeling only recycle (iter,seg) or whole trace
+                    # only recycle seems to be better for now
+                    #if [it, wlk] in succ_traces:
+                    if (it, wlk) in succ_pairs:
+                        label = 1
                     else:
-                        feat_name = f"auxdata/{feat}"
-                        # TODO: eventually can account for multi depth dim auxdata
-                        feat_depth = 0
+                        label = 0
 
-                    ### calc the ∆feat value of each feature of current (it, wlk) ###
-                    # first grab the correctly indexed (it, wlk, feat) array from h5 file
-                    it_wlk_feat_data = np.atleast_2d(self.h5[f"iterations/iter_{it:08d}/{feat_name}"][wlk])
-                    # properly shape the array for ndims of auxdata
-                    if feat_name[:7] == "auxdata":
-                        # (if tau=11) goes from row to column (1, 11) to (11, 1); pcoord is (11, n)
-                        it_wlk_feat_data = it_wlk_feat_data.reshape(self.tau, 1)
+                    # loop each feature name
+                    for feat_i, feat in enumerate(self.feat_names):
+                        # need to account for pcoords before auxdata
+                        if feat[:-2] == "pcoord":
+                            feat_name = "pcoord"
+                            feat_depth = int(feat[-1:])
+                        else:
+                            feat_name = f"auxdata/{feat}"
+                            # TODO: eventually can account for multi depth dim auxdata
+                            # e.g. for a distance matrix (maybe W184 M1 to all M2 residues and vv)
+                            feat_depth = 0
 
-                    # ∆feat = |last frame - first frame|
-                    d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
-                                        it_wlk_feat_data[:, feat_depth][0])
+                        ### calc the ∆feat value of each feature of current (it, wlk) ###
+                        # first grab the correctly indexed (it, wlk, feat) array from h5 file
+                        it_wlk_feat_data = np.atleast_2d(self.h5[f"iterations/iter_{it:08d}/{feat_name}"][wlk])
+                        # properly shape the array for ndims of auxdata
+                        if feat_name[:7] == "auxdata":
+                            # (if tau=11) goes from row to column (1, 11) to (11, 1); pcoord is (11, n)
+                            it_wlk_feat_data = it_wlk_feat_data.reshape(self.tau, 1)
 
-                    # assign values of ml_input array
-                    ml_input[seg_n, feat_i] = d_feat
+                        # ∆feat = |last frame - first frame|
+                        d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
+                                            it_wlk_feat_data[:, feat_depth][0])
 
-                # label the segment
-                seg_labels[seg_n] = label
-                # iterate the overall row number
-                seg_n += 1
+                        # assign values of ml_input array
+                        ml_input[seg_n, feat_i] = d_feat
 
-        # standardize
-        ml_input = sklearn.preprocessing.StandardScaler().fit_transform(ml_input)
+                    # label the segment
+                    seg_labels[seg_n] = label
+                    # iterate the overall row number
+                    seg_n += 1
+
+            # standardize: actually, just norm should be fine since these are |∆values|
+            #ml_input = sklearn.preprocessing.StandardScaler().fit_transform(ml_input)
+            
+            # l2 is sum of squares norm, l1 is sum of abs vector values, max is maximum value norm
+            # for me, max value norm is most intuitive here
+            # normalizing each feature ∆value (axis=0)
+            ml_input = sklearn.preprocessing.normalize(ml_input, norm="max", axis=0)
 
         # optionally save to file
         if savefile:
             np.savetxt("X_" + savefile, ml_input, delimiter="\t")
             np.savetxt("y_" + savefile, seg_labels, delimiter="\t")
 
-        # TODO: may need to reshape the seg_labels
         return ml_input, seg_labels
 
     def loss_f(self, feat_w):
@@ -338,10 +339,10 @@ class ML_Pcoord:
             # eps = step size used for estimation of jacobian in minimization
             # eps must be large enough to get out of local mimima for SLSQP
             # gradually decrease step size per cycle
-            options = {"eps": 10**-cycle}
+            options = {"eps": 100**-cycle}
             #options = {"eps": 1**(-8+cycle)}
             #options = {"eps": 1}
-            # default
+            # default (sqrt of machine epsilon for float64)
             #options = {"eps": 1.4901161193847656e-08}
 
             # only for first cycle
@@ -370,7 +371,7 @@ class ML_Pcoord:
             # var to compare each scoring function
             feat_loss = feat_min.fun
 
-            #print(feat_min)
+            print(feat_min)
             print("--------------------------------------------")
             print(f"CYCLE: {cycle} | POST LOSS: {-feat_loss}")
             print("--------------------------------------------")
@@ -381,8 +382,8 @@ class ML_Pcoord:
 
         if plot:
             fig.tight_layout()
-            plt.show()
-            #plt.savefig("roc.png", dpi=300, transparent=True)
+            #plt.show()
+            plt.savefig("roc.png", dpi=300, transparent=True)
         self.feat_w = feat_w
         return feat_w
 
@@ -396,7 +397,7 @@ class ML_Pcoord:
             fig, ax = plt.subplots()
         else:
             fig = plt.gcf()
-        ax.plot(x, y, label=f"{label}ROC: {score:0.3f}")
+        ax.plot(x, y, label=f"{label}AUC: {score:0.3f}")
         ax.plot([0, 1], [0, 1], color="k", linestyle="--")
         ax.set_xlabel("False Positive Rate")
         ax.set_ylabel("True Positive Rate")
@@ -423,39 +424,50 @@ class ML_Pcoord:
         ax.set_ylabel("Weight")
         ax.set_title("Weight per Feature")
         fig.tight_layout()
-        #plt.savefig("weights.png", dpi=300, transparent=True)
+        plt.savefig("weights.png", dpi=300, transparent=True)
         #plt.show()
 
-        top = np.argpartition(fw, -top_n)[-top_n:]
+        top = np.argpartition(self.feat_w, -top_n)[-top_n:]
         
         # sort by weight and return top n
-        return sorted(zip(names[top], fw[top]), key=lambda t: t[1], reverse=True)
+        return sorted(zip(np.array(self.feat_names)[top], self.feat_w[top]), key=lambda t: t[1], reverse=True)
 
 
 if __name__ == "__main__":
     ### making a few datasets ###
+    # this dataset didn't have good results, too easy of a classification problem
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", first_iter=10, last_iter=160)
     # ml.create_ml_input(savefile="ml_input.tsv")
 
+    # this was a better dataset, more variety of trajectories
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
     # ml.create_ml_input(savefile="ml_input.tsv")
-
+    
     # without the pcoord_1 and min_dist datasets (which define the recycle boundary)
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
     # ml.create_ml_input(savefile="ml_input_cut.tsv")
 
+    # random test dataset
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
+    # ml.create_ml_input(savefile="ml_input_rand.tsv", random=True)
+
     ### eda ###
+    # find and output all successfull trajectories
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
     # succ = ml.w_succ()
     # print(succ)
 
+    # load dataset
     # X = np.loadtxt("X_ml_input.tsv")
     # y = np.loadtxt("y_ml_input.tsv")
-    # i10-160 = 61 True segs / 3624 for traced succ label True
+    
+    # count how many True
     #print(np.count_nonzero(y))
 
-    # # i10-160 = 48 True segs / 3624 for traced succ label True
+    # count how many False
     # print(np.count_nonzero(y==0))
+
+    # random dataset plot
     # plt.plot(X[120])
     # plt.show()
 
@@ -467,11 +479,21 @@ if __name__ == "__main__":
     # print(top)
     # plt.show()
 
-    ### rocauc plot and opt with skip_feats ###
+    ### rocauc plot and opt with skip_feats | also testing with and without std/norm ###
+    ### from tests, going to go with no standardization and max vector based norm ###
     ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
                    skip_feats=["pcoord_1", "min_dist"])
     names = np.array(ml.feat_names)
-    fw = ml.optimize_pcoord(plot=False, recycle=1)
-    top = ml.plot_weights()
+    fw = ml.optimize_pcoord(plot=True, recycle=1)
+    # seems like there are 6 non-near-zero features from the plot
+    top = ml.plot_weights(top_n=10)
     print(top)
     plt.show()
+
+    ### random dataset ###
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_rand.tsv", seg_labels="y_ml_input_rand.tsv")
+    # names = np.array(ml.feat_names)
+    # fw = ml.optimize_pcoord(plot=True, recycle=1)
+    # top = ml.plot_weights(top_n=10)
+    # print(top)
+    # plt.show()
