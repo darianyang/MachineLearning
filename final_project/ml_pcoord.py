@@ -444,8 +444,8 @@ if __name__ == "__main__":
     # ml.create_ml_input(savefile="ml_input.tsv")
     
     # without the pcoord_1 and min_dist datasets (which define the recycle boundary)
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
-    # ml.create_ml_input(savefile="ml_input_cut.tsv")
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
+    ml.create_ml_input(savefile="ml_input_cut.tsv")
 
     # random test dataset
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
