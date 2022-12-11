@@ -414,7 +414,7 @@ class ML_Pcoord:
         # return the scipy min object
         return feat_min
 
-    def split_score(self, model=None, score="auc", confusion=False):
+    def split_score(self, model=None, score="auc", confusion=False, opt_weights=False):
         """
         Split ml_input into test/train datasets, opt weights using training data, 
         and use those weights or the input model to predict on test data.
@@ -427,6 +427,8 @@ class ML_Pcoord:
         confusion : bool
             True to compute and print the confusion matrix.
             Note, only possible with binary classification model, not with weight probabilites.
+        opt_weights : bool
+            Optionally opt weights and then use input model.
 
         Returns
         -------
@@ -439,7 +441,7 @@ class ML_Pcoord:
                                                      test_size=0.8, stratify=self.seg_labels)
 
         # run weight gradient opt on training 
-        if model is None:
+        if model is None or opt_weights is True:
             # set ml_input to be training set
             self.ml_input = X_train
             self.seg_labels = y_train
@@ -458,7 +460,10 @@ class ML_Pcoord:
                 y_pred = log_fit.predict(y_pred.reshape(-1, 1))
 
         # otherwise, try other models besides my opt model (RF, logistic, etc)
-        else:
+        if model is not None:
+            if opt_weights:
+                X_train = np.multiply(X_train, self.feat_w)
+                X_test = np.multiply(X_test, self.feat_w)
             self.model = model.fit(X_train, y_train)
             # estimate test labels
             y_pred = self.model.predict(X_test)
@@ -622,17 +627,16 @@ if __name__ == "__main__":
 
     ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", ml_input="X_ml_input_v01.tsv", seg_labels="y_ml_input_v01.tsv")
     
-    score = ml.split_score(score="auc", confusion=True)
-    print(ml.plot_weights())
+    # score = ml.split_score(score="auc", confusion=True)
+    # print(ml.plot_weights())
 
-    # score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc", confusion=True)
-    # print(f"OOB: {ml.model.oob_score_}")
-    # print(ml.plot_weights(weights=ml.model.feature_importances_))
+    # tested RF with weighted input array, same/similar result, maybe a little better, need CV to be sure
+    score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc", confusion=True, opt_weights=False)
+    print(f"OOB: {ml.model.oob_score_}")
+    print(ml.plot_weights(weights=ml.model.feature_importances_))
 
     #plt.show()
     print(score)
-
-    # TODO: ready to calc confusion matrix
 
     # TODO: run cv
     # mention in nb that using weights, can get probability estimates for binary classification
