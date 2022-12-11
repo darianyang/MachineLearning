@@ -25,7 +25,8 @@ np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
     def __init__(self, h5=None, first_iter=1, last_iter=None, savefile=None,
-                 ml_input=None, seg_labels=None, skip_feats=None, n_succ=0):
+                 ml_input=None, seg_labels=None, skip_feats=None, n_succ=0,
+                 label_space=None, rand_ml_input=False, gen_ml_input=True):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
@@ -52,6 +53,16 @@ class ML_Pcoord:
             Number of (iter, seg) additional pairs in each successfull trace path to label as True.
             Default 0, so only the recycled iteration. Increasing this value and including more
             history may be useful but will need to be optimized on a case-by-case basis.
+        label_space : list
+            List of 3 elements: [(feat_name), (gt or lt), (float or int)]
+            This determines which segments are labeled as True.
+            e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be multi-dim)
+                 every seg with pcoord_0 value > 37 will be counted as True.
+            With None, use the recycled trajectories from west.h5.
+        rand_ml_input : bool
+            Default False, if True, ml_input is random values with 50/50 T/F labels.
+        gen_ml_input : bool
+            Deafult True, generate the ml_input array.
         """
         # import west.h5 data file
         self.h5 = h5py.File(h5, "r")
@@ -89,18 +100,22 @@ class ML_Pcoord:
             # remove skipped feats from feature name list
             self.feat_names = [i for i in self.feat_names if i not in self.skip_feats]
 
+        # ml_input array options
         # number of (iter, seg) pairs to count as True
         self.n_succ = n_succ
-
         # optionally save ml_input
         self.savefile = savefile
+        self.label_space = label_space
+        self.rand_ml_input = rand_ml_input
 
-        # don't create the ml_input array if provided with filepath str
-        if self.ml_input is None or self.seg_labels is None:
-            self.ml_input, self.seg_labels = self.create_ml_input()
-        elif isinstance(self.ml_input, str):
-            self.ml_input = np.loadtxt(self.ml_input)
-            self.seg_labels = np.loadtxt(self.seg_labels)
+        # only make input array if specified
+        if gen_ml_input:
+            # don't create the ml_input array if provided with filepath str
+            if self.ml_input is None or self.seg_labels is None:
+                self.ml_input, self.seg_labels = self.create_ml_input()
+            elif isinstance(self.ml_input, str):
+                self.ml_input = np.loadtxt(self.ml_input)
+                self.seg_labels = np.loadtxt(self.seg_labels)
 
     ### trace_walker and get_parents helper methods normally avail in wedap ###
     def get_parents(self, walker_tuple):
@@ -139,20 +154,9 @@ class ML_Pcoord:
         # TODO: order this by iter and seg vals? currently segs not sorted
         return succ
             
-    def create_ml_input(self, label_space=None, random=False):
+    def create_ml_input(self):
         """
         Generate ml dataset from west.h5.
-
-        Parameters
-        ----------
-        label_space : list
-            List of 3 elements: [(feat_name), (gt or lt), (float or int)]
-            This determines which segments are labeled as True.
-            e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be multi-dim)
-                 every seg with pcoord_0 value > 37 will be counted as True.
-            With None, use the recycled trajectories from west.h5.
-        random : bool
-            Default False, if True, returns an output file of random values with 50/50 T/F labels.
 
         Returns
         -------
@@ -185,7 +189,7 @@ class ML_Pcoord:
             #     else:
             #         raise ValueError(f"label_space[1] must be 'gt' or 'lt', not {label_space[1]}")
         # find list of successfully recycled trajectories: (iter,seg) pairs
-        if label_space is None:
+        if self.label_space is None:
             succ_traces = []
             succ_pairs = self.w_succ()
 
@@ -208,7 +212,7 @@ class ML_Pcoord:
             raise ValueError("label_space arg is not working yet...")
 
         # output a random dataset for testing the optimzation
-        if random:
+        if self.rand_ml_input:
             # make labels 50/50 T/F (back half of array as True (1))
             seg_labels[(int(seg_labels.shape[0] / 2)):] = 1
 
