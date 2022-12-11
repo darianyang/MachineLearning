@@ -1,5 +1,5 @@
 """
-Some helper functions to create the initial dataset and run ML.
+ML_Pcoord class to create the initial dataset and run weight optimization.
 TODO: Eventually, integrate into wedap.
 """
 
@@ -81,7 +81,7 @@ class ML_Pcoord:
         self.feat_names = [f"pcoord_{dim}" for dim in range(n_pcoords)] + \
                            list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"])
 
-        # optionally skip certain specified features (TODO)
+        # optionally skip certain specified features
         if skip_feats:
             self.skip_feats = skip_feats
             # subtract the skipped feats from total n_features
@@ -115,7 +115,7 @@ class ML_Pcoord:
         path = [(it,wlk)]
         # And trace it (TODO: maybe add option for full trace?)
         #while it > 1: 
-        # TODO: trying to limit the trace to n_succ
+        # limit the trace to n_succ
         for _ in range(self.n_succ):
             # added to prevent tracing before iter 1
             if it == 1:
@@ -194,9 +194,6 @@ class ML_Pcoord:
                 # filter for only iterations considered
                 if pair[0] >= self.first_iter and pair[0] <= self.last_iter:
                     trace = self.trace_walker(pair)
-                    # need to filter the trace up to specified first_iter
-                    # TODO: this may not be needed since using n_succs now
-                    #trace = trace[self.first_iter-1:]
                     succ_traces.append(trace)
 
             # TODO: if succ_traces is None:
@@ -204,13 +201,13 @@ class ML_Pcoord:
 
             # unique (iter,seg) pairs from each trace of each succ_traj (iter,seg) pair
             succ_traces = np.unique(np.concatenate(succ_traces), axis=0)
-            # needs to be done to accommodate the succ traj label lookup
+            # needs to be formatted to accommodate the succ traj label lookup
             succ_traces = [(i[0], i[1]) for i in succ_traces]
 
         else:
             raise ValueError("label_space arg is not working yet...")
 
-        # TODO: output a random dataset for testing the optimzation
+        # output a random dataset for testing the optimzation
         if random:
             # make labels 50/50 T/F (back half of array as True (1))
             seg_labels[(int(seg_labels.shape[0] / 2)):] = 1
@@ -226,10 +223,8 @@ class ML_Pcoord:
             for it in tqdm(range(self.first_iter, self.last_iter + 1), desc="Creating input array"):
                 for wlk in range(self.n_particles[it - 1]):
                     # labeling as True if apart of succ traj paths
-                    # TODO: testing labeling only recycle (iter,seg) or whole trace
-                    # only recycle seems to be better for now
+                    # can label only recycled (iter,seg) pairs or n trace pairs
                     if (it, wlk) in succ_traces:
-                    #if (it, wlk) in succ_pairs:
                         label = 1
                     else:
                         label = 0
@@ -341,7 +336,6 @@ class ML_Pcoord:
         # implement bounds for each scalar in output array (0-1)
         feat_bounds = tuple((0,1) for _ in range(self.n_features))
 
-        # TODO: need to think about this, do I really need sum=1 constraint? Not necessarily
         # implement equality constraint (equals 0): sum of output array = 1
         constraints = ({"type": "eq", "fun": lambda x: np.sum(x) -1})
         #constraints = scipy.optimize.NonlinearConstraint(lambda x: np.sum(x), 1, 1)
@@ -349,7 +343,7 @@ class ML_Pcoord:
         if plot:
             fig, ax = plt.subplots()
 
-        # TODO: add noise test:
+        # TODO: add noise testing:
         # from Tiwary PIB paper, gaussian noise was added at 0.05 variance (sigma**2)= 0.05 stdev (sigma)
         # this was close to the initial weights
         # self.ml_input = np.multiply(self.ml_input, np.random.normal(np.average(self.ml_input), 
@@ -407,10 +401,12 @@ class ML_Pcoord:
 
         if plot:
             fig.tight_layout()
-            plt.show()
+            #plt.show()
             #plt.savefig("roc.png", dpi=300, transparent=True)
+
+        # save weights
         self.feat_w = feat_w
-        #return feat_w
+
         # return the scipy min object
         return feat_min
 
@@ -472,7 +468,6 @@ class ML_Pcoord:
             metric = sklearn.metrics.roc_auc_score(y_test, y_pred)
             fpr, tpr, thresholds = sklearn.metrics.roc_curve(y_test, y_pred)
             self.plot_roc_curve(fpr, tpr, metric)
-            plt.show()
         elif score == "f1":
             metric = sklearn.metrics.f1_score(y_test, y_pred)
         elif score == "acc":
@@ -516,6 +511,11 @@ class ML_Pcoord:
         weights : array
             Optionally input weights or feature importances.
             By default will use self.feat_w.
+
+        Returns
+        -------
+        sorted_top_n_features : array
+            top_n features with weights, sorted by decreasing weight.
         """
         if ax is None:
             fig, ax = plt.subplots()
@@ -531,8 +531,7 @@ class ML_Pcoord:
         ax.set_ylabel("Weight")
         ax.set_title("Weight per Feature")
         fig.tight_layout()
-        plt.savefig("weights.png", dpi=300, transparent=True)
-        #plt.show()
+        #plt.savefig("weights.png", dpi=300, transparent=True)
 
         top = np.argpartition(self.feat_w, -top_n)[-top_n:]
         
@@ -640,11 +639,12 @@ if __name__ == "__main__":
 
     # TODO: run cv
     # mention in nb that using weights, can get probability estimates for binary classification
-    # of new segments not in training data
+    # of new segments not in training data and can compare to other classifiers
 
     # TODO: run some RF random and grid search for hyperparameter opt
+    # or just regular RF with CV
 
-    ### trying with more positive labels from history ###
+    ### dataset with more positive labels from history ###
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", savefile="ml_input_v04_n10.tsv", n_succ=10)
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_v04_n3.tsv", seg_labels="y_ml_input_v04_n3.tsv")
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv")
