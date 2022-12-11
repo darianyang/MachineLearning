@@ -24,7 +24,7 @@ plt.style.use("/Users/darian/github/wedap/wedap/styles/default.mplstyle")
 np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
-    def __init__(self, h5=None, first_iter=1, last_iter=None,
+    def __init__(self, h5=None, first_iter=1, last_iter=None, savefile=None,
                  ml_input=None, seg_labels=None, skip_feats=None):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
@@ -37,6 +37,9 @@ class ML_Pcoord:
             The lower bound iteration to consider for data extraction.
         last_iter : int
             The upper bound iteration to consider for data extraction.
+        savefile : str
+            Optional path to save the output ml_input array as a tsv.
+            Saves the features as X_{savefile} and classifications as y_{savefile}.
         ml_input : str
             Path to input data file if already made, if present, does not generate new ml_input.
             Must also have seg_labels input file.
@@ -82,6 +85,9 @@ class ML_Pcoord:
             # remove skipped feats from feature name list
             self.feat_names = [i for i in self.feat_names if i not in self.skip_feats]
 
+        # optionally save ml_input
+        self.savefile = savefile
+
         # don't create the ml_input array if provided with filepath str
         if self.ml_input is None or self.seg_labels is None:
             self.ml_input, self.seg_labels = self.create_ml_input()
@@ -121,7 +127,7 @@ class ML_Pcoord:
         # TODO: order this by iter and seg vals? currently segs not sorted
         return succ
             
-    def create_ml_input(self, label_space=None, savefile=None, random=False):
+    def create_ml_input(self, label_space=None, random=False):
         """
         Generate ml dataset from west.h5.
 
@@ -133,9 +139,6 @@ class ML_Pcoord:
             e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be multi-dim)
                  every seg with pcoord_0 value > 37 will be counted as True.
             With None, use the recycled trajectories from west.h5.
-        savefile : str
-            Optional path to save the output ml_input array as a tsv.
-            Saves the features as X_{savefile} and classifications as y_{savefile}.
         random : bool
             Default False, if True, returns an output file of random values with 50/50 T/F labels.
 
@@ -254,9 +257,9 @@ class ML_Pcoord:
             ml_input = sklearn.preprocessing.normalize(ml_input, norm="max", axis=0)
 
         # optionally save to file
-        if savefile:
-            np.savetxt("X_" + savefile, ml_input, delimiter="\t")
-            np.savetxt("y_" + savefile, seg_labels, delimiter="\t")
+        if self.savefile:
+            np.savetxt("X_" + self.savefile, ml_input, delimiter="\t")
+            np.savetxt("y_" + self.savefile, seg_labels, delimiter="\t")
 
         return ml_input, seg_labels
 
@@ -425,15 +428,17 @@ class ML_Pcoord:
             # use optimized weights to score the test data
             y_pred = np.average(X_test, weights=self.feat_w, axis=1)
 
-            # fit to binary for scoring
-            # log_fit = linear_model.LogisticRegression().fit(self.feat_weighted.reshape(-1, 1), self.seg_labels)
-            # y_pred = log_fit.predict(y_pred.reshape(-1, 1))
+            # using arbitray logistic mapping since non auc metrics can't use probability
+            if score != "auc":
+                # fit to binary for scoring
+                log_fit = linear_model.LogisticRegression().fit(self.feat_weighted.reshape(-1, 1), self.seg_labels)
+                y_pred = log_fit.predict(y_pred.reshape(-1, 1))
 
         # otherwise, try other models besides my opt model (RF, logistic, etc)
         else:
-            model = model.fit(X_train, y_train)
+            self.model = model.fit(X_train, y_train)
             # estimate test labels
-            y_pred = model.predict(X_test)
+            y_pred = self.model.predict(X_test)
 
         if score == "auc":
             metric = sklearn.metrics.roc_auc_score(y_test, y_pred)
@@ -468,7 +473,7 @@ class ML_Pcoord:
         ax.set_title("Receiver Operating Characteristic (ROC) Curve", fontsize=16)
         ax.legend()
     
-    def plot_weights(self, top_n=10, ax=None):
+    def plot_weights(self, top_n=10, ax=None, weights=None):
         """
         Function for plotting the optimized weights of each feature.
 
@@ -477,11 +482,18 @@ class ML_Pcoord:
         top : int
             The amount of top features to return.
         ax : mpl axes object
+        weights : array
+            Optionally input weights or feature importances.
+            By default will use self.feat_w.
         """
         if ax is None:
             fig, ax = plt.subplots()
         else:
             fig = plt.gcf()
+
+        # for substituting with e.g. rg feature importances
+        if weights is not None:
+            self.feat_w = weights
 
         ax.scatter([i for i in range(self.feat_w.shape[0])], self.feat_w)
         ax.set_xlabel("Feature")
@@ -568,10 +580,29 @@ if __name__ == "__main__":
     # plt.show()
 
     ### test/train split and validate weight opt ###
-    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
-                   skip_feats=["pcoord_1", "min_dist"])
-    #score = ml.split_score(score="auc")
-    #score = ml.split_score(linear_model.LogisticRegression(), score="auc")
-    #score = ml.split_score(ensemble.RandomForestClassifier(), score="auc")
-    score = ml.split_score(ensemble.RandomForestRegressor(), score="auc")
+    # for both the easy and difficult dataset, RF model is not as good as gradient descent method
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
+    #                skip_feats=["pcoord_1", "min_dist"])
+    
+    # trying with v00 instead since it had proper recycling
+    #ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", savefile="ml_input_v01.tsv")
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", ml_input="X_ml_input_v01.tsv", seg_labels="y_ml_input_v01.tsv")
+    
+    # score = ml.split_score(score="auc")
+    # print(ml.plot_weights())
+
+    score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc")
+    print(f"OOB: {ml.model.oob_score_}")
+    print(ml.plot_weights(weights=ml.model.feature_importances_))
+
+    plt.show()
     print(score)
+
+    # TODO: run some RF random and grid search for hyperparameter opt
+
+    ### trying with more positive labels from history ### (TODO)
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
+    # ml.create_ml_input(savefile="ml_input_cut.tsv")
+    #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv")
+    #score = ml.split_score(score="auc")
+    #print(score)
