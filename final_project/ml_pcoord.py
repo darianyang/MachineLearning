@@ -10,6 +10,11 @@ import matplotlib.pyplot as plt
 import scipy.optimize
 import sklearn.metrics
 import sklearn.preprocessing
+import sklearn.model_selection
+
+from sklearn import linear_model
+from sklearn import ensemble
+
 from tqdm.auto import tqdm
 import sys
 
@@ -77,6 +82,13 @@ class ML_Pcoord:
             # remove skipped feats from feature name list
             self.feat_names = [i for i in self.feat_names if i not in self.skip_feats]
 
+        # don't create the ml_input array if provided with filepath str
+        if self.ml_input is None or self.seg_labels is None:
+            self.ml_input, self.seg_labels = self.create_ml_input()
+        elif isinstance(self.ml_input, str):
+            self.ml_input = np.loadtxt(self.ml_input)
+            self.seg_labels = np.loadtxt(self.seg_labels)
+
     ### trace_walker and get_parents helper methods normally avail in wedap ###
     def get_parents(self, walker_tuple):
         it, wlk = walker_tuple
@@ -97,8 +109,6 @@ class ML_Pcoord:
     def w_succ(self):
         """
         Find and return all successfully recycled (iter, seg) pairs.
-        TODO: eventually can use this to plot pdist of succ only trajs
-              note that I would have to norm by the overall pmax
         """
         succ = []
         for iter in range(self.last_iter):
@@ -120,7 +130,7 @@ class ML_Pcoord:
         label_space : list
             List of 3 elements: [(feat_name), (gt or lt), (float or int)]
             This determines which segments are labeled as True.
-            e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be general and multi-dim)
+            e.g. label_space=["pcoord_0", "gt", 37] (TODO: update to be multi-dim)
                  every seg with pcoord_0 value > 37 will be counted as True.
             With None, use the recycled trajectories from west.h5.
         savefile : str
@@ -146,6 +156,7 @@ class ML_Pcoord:
         # TODO: right now label_space is not ready for use: 
         #       I have to eventually set this up to be able to use not yet recycled and 
         #       "assigned" space from label_space as True labels
+        # might be better to use w_assign, then use that file for this, is there w_assign api?
         # previous code:
             # matching the input feature name for label cutoff
             # if feat == label_space[0]:
@@ -301,13 +312,6 @@ class ML_Pcoord:
         feat_w : 1d array
             Final optimized weights for each feature.
         """
-        # don't create the ml_input array if provided
-        if self.ml_input is None or self.seg_labels is None:
-            self.ml_input, self.seg_labels = self.create_ml_input()
-        else:
-            self.ml_input = np.loadtxt(self.ml_input)
-            self.seg_labels = np.loadtxt(self.seg_labels)
-
         # get constant starting weights
         feat_w = np.array([1/self.n_features for _ in range(self.n_features)])
         # random vs uniform initial guess array?
@@ -339,7 +343,7 @@ class ML_Pcoord:
             # eps = step size used for estimation of jacobian in minimization
             # eps must be large enough to get out of local mimima for SLSQP
             # gradually decrease step size per cycle
-            options = {"eps": 100**-cycle}
+            options = {"eps": 1**-cycle}
             #options = {"eps": 1**(-8+cycle)}
             #options = {"eps": 1}
             # default (sqrt of machine epsilon for float64)
@@ -371,7 +375,7 @@ class ML_Pcoord:
             # var to compare each scoring function
             feat_loss = feat_min.fun
 
-            print(feat_min)
+            #print(feat_min)
             print("--------------------------------------------")
             print(f"CYCLE: {cycle} | POST LOSS: {-feat_loss}")
             print("--------------------------------------------")
@@ -382,12 +386,72 @@ class ML_Pcoord:
 
         if plot:
             fig.tight_layout()
-            #plt.show()
-            plt.savefig("roc.png", dpi=300, transparent=True)
+            plt.show()
+            #plt.savefig("roc.png", dpi=300, transparent=True)
         self.feat_w = feat_w
-        return feat_w
+        #return feat_w
+        # return the scipy min object
+        return feat_min
 
-    def plot_roc_curve(self, x, y, score, label=None, ax=None):
+    def split_score(self, model=None, score="auc"):
+        """
+        Split ml_input into test/train datasets, opt weights using training data, 
+        and use those weights or the input model to predict on test data.
+
+        Parameters
+        ----------
+        model : sklearn model object
+        score : str
+            'auc', 'f1', 'acc', 'bacc'
+
+        Returns
+        -------
+        metric : float
+            Score for either the weight optimization or input model.
+        """
+        # split dataset (stratify to include equal True in splits)
+        X_train, X_test, y_train, y_test = \
+            sklearn.model_selection.train_test_split(self.ml_input, self.seg_labels, test_size=0.8, stratify=self.seg_labels)
+
+        # run weight gradient opt on training 
+        if model is None:
+            # set ml_input to be training set
+            self.ml_input = X_train
+            self.seg_labels = y_train
+
+            # optimize weights on training data
+            self.optimize_pcoord()
+            
+            # use optimized weights to score the test data
+            y_pred = np.average(X_test, weights=self.feat_w, axis=1)
+
+            # fit to binary for scoring
+            # log_fit = linear_model.LogisticRegression().fit(self.feat_weighted.reshape(-1, 1), self.seg_labels)
+            # y_pred = log_fit.predict(y_pred.reshape(-1, 1))
+
+        # otherwise, try other models besides my opt model (RF, logistic, etc)
+        else:
+            model = model.fit(X_train, y_train)
+            # estimate test labels
+            y_pred = model.predict(X_test)
+
+        if score == "auc":
+            metric = sklearn.metrics.roc_auc_score(y_test, y_pred)
+            fpr, tpr, thresholds = sklearn.metrics.roc_curve(y_test, y_pred)
+            self.plot_roc_curve(fpr, tpr, metric)
+            plt.show()
+        elif score == "f1":
+            metric = sklearn.metrics.f1_score(y_test, y_pred)
+        elif score == "acc":
+            metric = sklearn.metrics.accuracy_score(y_test, y_pred)
+        elif score == "bacc":
+            metric = sklearn.metrics.balanced_accuracy_score(y_test, y_pred)
+
+        #print(np.testing.assert_array_equal(y_test, y_pred))
+
+        return metric
+
+    def plot_roc_curve(self, x, y, score, label="", ax=None):
         """
         Function for plotting the reciever operator characteristic curve 
         with the X axis as the false positive rate and the y axis as the 
@@ -444,8 +508,8 @@ if __name__ == "__main__":
     # ml.create_ml_input(savefile="ml_input.tsv")
     
     # without the pcoord_1 and min_dist datasets (which define the recycle boundary)
-    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
-    ml.create_ml_input(savefile="ml_input_cut.tsv")
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
+    # ml.create_ml_input(savefile="ml_input_cut.tsv")
 
     # random test dataset
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
@@ -481,14 +545,19 @@ if __name__ == "__main__":
 
     ### rocauc plot and opt with skip_feats | also testing with and without std/norm ###
     ### from tests, going to go with no standardization and max vector based norm ###
-    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
-                   skip_feats=["pcoord_1", "min_dist"])
-    names = np.array(ml.feat_names)
-    fw = ml.optimize_pcoord(plot=True, recycle=1)
-    # seems like there are 6 non-near-zero features from the plot
-    top = ml.plot_weights(top_n=10)
-    print(top)
-    plt.show()
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
+    #                skip_feats=["pcoord_1", "min_dist"])
+    # names = np.array(ml.feat_names)
+    # fw = ml.optimize_pcoord(plot=True, recycle=1)
+    # # seems like there are 6 non-near-zero features from the plot
+    # top = ml.plot_weights(top_n=10)
+    # print(top)
+    # plt.show()
+
+    # TODO: test/train split, run cv, and calc confusion matrix
+    # also try random forest to compare feature importance and opt weights
+    # mention in nb that using weights, can get probability estimates for binary classification
+    # of new segments not in training data
 
     ### random dataset ###
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_rand.tsv", seg_labels="y_ml_input_rand.tsv")
@@ -497,3 +566,12 @@ if __name__ == "__main__":
     # top = ml.plot_weights(top_n=10)
     # print(top)
     # plt.show()
+
+    ### test/train split and validate weight opt ###
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
+                   skip_feats=["pcoord_1", "min_dist"])
+    #score = ml.split_score(score="auc")
+    #score = ml.split_score(linear_model.LogisticRegression(), score="auc")
+    #score = ml.split_score(ensemble.RandomForestClassifier(), score="auc")
+    score = ml.split_score(ensemble.RandomForestRegressor(), score="auc")
+    print(score)
