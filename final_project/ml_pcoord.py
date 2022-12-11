@@ -25,7 +25,7 @@ np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
     def __init__(self, h5=None, first_iter=1, last_iter=None, savefile=None,
-                 ml_input=None, seg_labels=None, skip_feats=None):
+                 ml_input=None, seg_labels=None, skip_feats=None, n_succ=0):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
@@ -48,6 +48,10 @@ class ML_Pcoord:
             Must also have ml_input input file.
         skip_feats : list
             List of str feature names to not include in ml_input dataset.
+        n_succ : int
+            Number of (iter, seg) additional pairs in each successfull trace path to label as True.
+            Default 0, so only the recycled iteration. Increasing this value and including more
+            history may be useful but will need to be optimized on a case-by-case basis.
         """
         # import west.h5 data file
         self.h5 = h5py.File(h5, "r")
@@ -85,6 +89,9 @@ class ML_Pcoord:
             # remove skipped feats from feature name list
             self.feat_names = [i for i in self.feat_names if i not in self.skip_feats]
 
+        # number of (iter, seg) pairs to count as True
+        self.n_succ = n_succ
+
         # optionally save ml_input
         self.savefile = savefile
 
@@ -106,8 +113,13 @@ class ML_Pcoord:
         it, wlk = walker_tuple
         # Initialize our path
         path = [(it,wlk)]
-        # And trace it
-        while it > 1: 
+        # And trace it (TODO: maybe add option for full trace?)
+        #while it > 1: 
+        # TODO: trying to limit the trace to n_succ
+        for _ in range(self.n_succ):
+            # added to prevent tracing before iter 1
+            if it == 1:
+                break
             it, wlk = self.get_parents((it, wlk))
             path.append((it,wlk))
         return np.array(sorted(path, key=lambda x: x[0]))
@@ -176,19 +188,25 @@ class ML_Pcoord:
         if label_space is None:
             succ_traces = []
             succ_pairs = self.w_succ()
+
             # make an array for all succ (iter,seg) traced paths
             for pair in succ_pairs:
                 # filter for only iterations considered
                 if pair[0] >= self.first_iter and pair[0] <= self.last_iter:
                     trace = self.trace_walker(pair)
                     # need to filter the trace up to specified first_iter
-                    trace = trace[self.first_iter-1:]
+                    # TODO: this may not be needed since using n_succs now
+                    #trace = trace[self.first_iter-1:]
                     succ_traces.append(trace)
 
             # TODO: if succ_traces is None:
                 # raise error "No successfull trajectories found, please input a label_space criterion"
+
             # unique (iter,seg) pairs from each trace of each succ_traj (iter,seg) pair
             succ_traces = np.unique(np.concatenate(succ_traces), axis=0)
+            # needs to be done to accommodate the succ traj label lookup
+            succ_traces = [(i[0], i[1]) for i in succ_traces]
+
         else:
             raise ValueError("label_space arg is not working yet...")
 
@@ -210,8 +228,8 @@ class ML_Pcoord:
                     # labeling as True if apart of succ traj paths
                     # TODO: testing labeling only recycle (iter,seg) or whole trace
                     # only recycle seems to be better for now
-                    #if [it, wlk] in succ_traces:
-                    if (it, wlk) in succ_pairs:
+                    if (it, wlk) in succ_traces:
+                    #if (it, wlk) in succ_pairs:
                         label = 1
                     else:
                         label = 0
@@ -396,7 +414,7 @@ class ML_Pcoord:
         # return the scipy min object
         return feat_min
 
-    def split_score(self, model=None, score="auc"):
+    def split_score(self, model=None, score="auc", confusion=False):
         """
         Split ml_input into test/train datasets, opt weights using training data, 
         and use those weights or the input model to predict on test data.
@@ -406,6 +424,8 @@ class ML_Pcoord:
         model : sklearn model object
         score : str
             'auc', 'f1', 'acc', 'bacc'
+        confusion : bool
+            True to compute and print the confusion matrix.
 
         Returns
         -------
@@ -452,7 +472,9 @@ class ML_Pcoord:
         elif score == "bacc":
             metric = sklearn.metrics.balanced_accuracy_score(y_test, y_pred)
 
-        #print(np.testing.assert_array_equal(y_test, y_pred))
+        if confusion:
+            print("Confusion Matrix (tn, fp, fn, tp):")
+            print(sklearn.metrics.confusion_matrix(y_test, y_pred))
 
         return metric
 
@@ -508,6 +530,17 @@ class ML_Pcoord:
         # sort by weight and return top n
         return sorted(zip(np.array(self.feat_names)[top], self.feat_w[top]), key=lambda t: t[1], reverse=True)
 
+    def count_tf(self):
+        """
+        Print amount of T/F labels in dataset.
+        """
+        # count how many True
+        t = np.count_nonzero(self.seg_labels)
+
+        # count how many False
+        f = np.count_nonzero(self.seg_labels==0)
+
+        print(f"TRUE: {t} | FALSE: {f}")
 
 if __name__ == "__main__":
     ### making a few datasets ###
@@ -566,11 +599,6 @@ if __name__ == "__main__":
     # print(top)
     # plt.show()
 
-    # TODO: test/train split, run cv, and calc confusion matrix
-    # also try random forest to compare feature importance and opt weights
-    # mention in nb that using weights, can get probability estimates for binary classification
-    # of new segments not in training data
-
     ### random dataset ###
     # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_rand.tsv", seg_labels="y_ml_input_rand.tsv")
     # names = np.array(ml.feat_names)
@@ -586,23 +614,29 @@ if __name__ == "__main__":
     
     # trying with v00 instead since it had proper recycling
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", savefile="ml_input_v01.tsv")
-    ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", ml_input="X_ml_input_v01.tsv", seg_labels="y_ml_input_v01.tsv")
+
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", ml_input="X_ml_input_v01.tsv", seg_labels="y_ml_input_v01.tsv")
     
-    # score = ml.split_score(score="auc")
-    # print(ml.plot_weights())
+    # # score = ml.split_score(score="auc")
+    # # print(ml.plot_weights())
 
-    score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc")
-    print(f"OOB: {ml.model.oob_score_}")
-    print(ml.plot_weights(weights=ml.model.feature_importances_))
+    # score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc")
+    # print(f"OOB: {ml.model.oob_score_}")
+    # print(ml.plot_weights(weights=ml.model.feature_importances_))
 
-    plt.show()
-    print(score)
+    # plt.show()
+    # print(score)
 
+    # TODO: ready to calc confusion matrix
+
+    # TODO: run cv
+    # mention in nb that using weights, can get probability estimates for binary classification
+    # of new segments not in training data
+    
     # TODO: run some RF random and grid search for hyperparameter opt
 
-    ### trying with more positive labels from history ### (TODO)
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
-    # ml.create_ml_input(savefile="ml_input_cut.tsv")
+    ### trying with more positive labels from history ###
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", savefile="ml_input_v04_n10.tsv", n_succ=10)
+    #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_v04_n3.tsv", seg_labels="y_ml_input_v04_n3.tsv")
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv")
-    #score = ml.split_score(score="auc")
-    #print(score)
+    ml.count_tf()
