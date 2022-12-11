@@ -426,6 +426,7 @@ class ML_Pcoord:
             'auc', 'f1', 'acc', 'bacc'
         confusion : bool
             True to compute and print the confusion matrix.
+            Note, only possible with binary classification model, not with weight probabilites.
 
         Returns
         -------
@@ -434,7 +435,8 @@ class ML_Pcoord:
         """
         # split dataset (stratify to include equal True in splits)
         X_train, X_test, y_train, y_test = \
-            sklearn.model_selection.train_test_split(self.ml_input, self.seg_labels, test_size=0.8, stratify=self.seg_labels)
+            sklearn.model_selection.train_test_split(self.ml_input, self.seg_labels, 
+                                                     test_size=0.8, stratify=self.seg_labels)
 
         # run weight gradient opt on training 
         if model is None:
@@ -451,7 +453,8 @@ class ML_Pcoord:
             # using arbitray logistic mapping since non auc metrics can't use probability
             if score != "auc":
                 # fit to binary for scoring
-                log_fit = linear_model.LogisticRegression().fit(self.feat_weighted.reshape(-1, 1), self.seg_labels)
+                log_fit = linear_model.LogisticRegression().fit(self.feat_weighted.reshape(-1, 1), 
+                                                                self.seg_labels)
                 y_pred = log_fit.predict(y_pred.reshape(-1, 1))
 
         # otherwise, try other models besides my opt model (RF, logistic, etc)
@@ -472,9 +475,10 @@ class ML_Pcoord:
         elif score == "bacc":
             metric = sklearn.metrics.balanced_accuracy_score(y_test, y_pred)
 
+        # print confusion matrix
         if confusion:
             print("Confusion Matrix (tn, fp, fn, tp):")
-            print(sklearn.metrics.confusion_matrix(y_test, y_pred))
+            print(sklearn.metrics.confusion_matrix(y_test, y_pred).ravel())
 
         return metric
 
@@ -528,7 +532,8 @@ class ML_Pcoord:
         top = np.argpartition(self.feat_w, -top_n)[-top_n:]
         
         # sort by weight and return top n
-        return sorted(zip(np.array(self.feat_names)[top], self.feat_w[top]), key=lambda t: t[1], reverse=True)
+        return sorted(zip(np.array(self.feat_names)[top], self.feat_w[top]), 
+                                   key=lambda t: t[1], reverse=True)
 
     def count_tf(self):
         """
@@ -613,30 +618,30 @@ if __name__ == "__main__":
     #                skip_feats=["pcoord_1", "min_dist"])
     
     # trying with v00 instead since it had proper recycling
-    #ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", savefile="ml_input_v01.tsv")
+    #ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", savefile="ml_input_v01.tsv") # make file
 
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", ml_input="X_ml_input_v01.tsv", seg_labels="y_ml_input_v01.tsv")
+    ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", ml_input="X_ml_input_v01.tsv", seg_labels="y_ml_input_v01.tsv")
     
-    # # score = ml.split_score(score="auc")
-    # # print(ml.plot_weights())
+    score = ml.split_score(score="auc", confusion=True)
+    print(ml.plot_weights())
 
-    # score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc")
+    # score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc", confusion=True)
     # print(f"OOB: {ml.model.oob_score_}")
     # print(ml.plot_weights(weights=ml.model.feature_importances_))
 
-    # plt.show()
-    # print(score)
+    #plt.show()
+    print(score)
 
     # TODO: ready to calc confusion matrix
 
     # TODO: run cv
     # mention in nb that using weights, can get probability estimates for binary classification
     # of new segments not in training data
-    
+
     # TODO: run some RF random and grid search for hyperparameter opt
 
     ### trying with more positive labels from history ###
-    ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", savefile="ml_input_v04_n10.tsv", n_succ=10)
+    #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", savefile="ml_input_v04_n10.tsv", n_succ=10)
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_v04_n3.tsv", seg_labels="y_ml_input_v04_n3.tsv")
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv")
-    ml.count_tf()
+    #ml.count_tf()
