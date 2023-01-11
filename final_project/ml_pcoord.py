@@ -24,12 +24,14 @@ plt.style.use("/Users/darian/github/wedap/wedap/styles/default.mplstyle")
 np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Pcoord:
-    def __init__(self, h5=None, first_iter=1, last_iter=None, savefile=None,
+    def __init__(self, h5, first_iter=1, last_iter=None, savefile=None,
                  ml_input=None, seg_labels=None, skip_feats=None, n_succ=0,
                  label_space=None, rand_ml_input=False, gen_ml_input=True):
         """
         Methods to generate weights for a machine learning based pcoord from a west.h5 file.
 
+        # TODO: option to change standardization/normalization type
+        #       e.g. max, l1, l2, std, None ; 'delta', 'None'
         Parameters
         ----------
         h5 : str
@@ -49,6 +51,7 @@ class ML_Pcoord:
             Must also have ml_input input file.
         skip_feats : list
             List of str feature names to not include in ml_input dataset.
+            TODO: option to toggle to select only these feats (inverse this).
         n_succ : int
             Number of (iter, seg) additional pairs in each successfull trace path to label as True.
             Default 0, so only the recycled iteration. Increasing this value and including more
@@ -88,6 +91,8 @@ class ML_Pcoord:
         n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[2]
         self.n_features += n_pcoords
 
+        # TODO: *** adjust this to handle multi-dim aux data
+        
         # get the names of each feature (and multiple pcoords)
         self.feat_names = [f"pcoord_{dim}" for dim in range(n_pcoords)] + \
                            list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"])
@@ -154,7 +159,7 @@ class ML_Pcoord:
         # TODO: order this by iter and seg vals? currently segs not sorted
         return succ
             
-    def create_ml_input(self):
+    def create_ml_input(self, norm=False):
         """
         Generate ml dataset from west.h5.
 
@@ -164,6 +169,8 @@ class ML_Pcoord:
             Array of features for each segment in specified last_iter.
         seg_labels : 1d array
             Array of binary labels with successful trajectories as True.
+        norm : bool
+            Normalize the final array.
         """
         # initialize empty but correctly shaped array
         # rows are segs for each iter in specified range, cols are n_features
@@ -200,8 +207,9 @@ class ML_Pcoord:
                     trace = self.trace_walker(pair)
                     succ_traces.append(trace)
 
-            # TODO: if succ_traces is None:
-                # raise error "No successfull trajectories found, please input a label_space criterion"
+            # implicit booleanness of list
+            if not succ_traces:
+                raise NameError("No successfull trajectories found, please input a label_space criterion")
 
             # unique (iter,seg) pairs from each trace of each succ_traj (iter,seg) pair
             succ_traces = np.unique(np.concatenate(succ_traces), axis=0)
@@ -271,7 +279,8 @@ class ML_Pcoord:
             # l2 is sum of squares norm, l1 is sum of abs vector values, max is maximum value norm
             # for me, max value norm is most intuitive here
             # normalizing each feature ∆value (axis=0)
-            ml_input = sklearn.preprocessing.normalize(ml_input, norm="max", axis=0)
+            if norm:
+                ml_input = sklearn.preprocessing.normalize(ml_input, norm="max", axis=0)
 
         # optionally save to file
         if self.savefile:
@@ -556,100 +565,41 @@ class ML_Pcoord:
         print(f"TRUE: {t} | FALSE: {f}")
 
 if __name__ == "__main__":
-    ### making a few datasets ###
-    # this dataset didn't have good results, too easy of a classification problem
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", first_iter=10, last_iter=160)
-    # ml.create_ml_input(savefile="ml_input.tsv")
-
-    # this was a better dataset, more variety of trajectories
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
-    # ml.create_ml_input(savefile="ml_input.tsv")
-    
-    # without the pcoord_1 and min_dist datasets (which define the recycle boundary)
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", skip_feats=["pcoord_1", "min_dist"])
-    # ml.create_ml_input(savefile="ml_input_cut.tsv")
-
-    # random test dataset
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
-    # ml.create_ml_input(savefile="ml_input_rand.tsv", random=True)
-
-    ### eda ###
-    # find and output all successfull trajectories
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5")
-    # succ = ml.w_succ()
-    # print(succ)
-
-    # load dataset
-    # X = np.loadtxt("X_ml_input.tsv")
-    # y = np.loadtxt("y_ml_input.tsv")
-    
-    # count how many True
-    #print(np.count_nonzero(y))
-
-    # count how many False
-    # print(np.count_nonzero(y==0))
-
-    # random dataset plot
-    # plt.plot(X[120])
-    # plt.show()
-
-    ### rocauc plot and opt all feats ###
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input.tsv", seg_labels="y_ml_input.tsv")
-    # names = np.array(ml.feat_names)
-    # fw = ml.optimize_pcoord(plot=True, recycle=1)
-    # top = ml.plot_weights()
-    # print(top)
-    # plt.show()
-
-    ### rocauc plot and opt with skip_feats | also testing with and without std/norm ###
-    ### from tests, going to go with no standardization and max vector based norm ###
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
-    #                skip_feats=["pcoord_1", "min_dist"])
-    # names = np.array(ml.feat_names)
-    # fw = ml.optimize_pcoord(plot=True, recycle=1)
-    # # seems like there are 6 non-near-zero features from the plot
-    # top = ml.plot_weights(top_n=10)
-    # print(top)
-    # plt.show()
-
-    ### random dataset ###
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_rand.tsv", seg_labels="y_ml_input_rand.tsv")
-    # names = np.array(ml.feat_names)
-    # fw = ml.optimize_pcoord(plot=True, recycle=1)
-    # top = ml.plot_weights(top_n=10)
-    # print(top)
-    # plt.show()
-
-    ### test/train split and validate weight opt ###
-    # for both the easy and difficult dataset, RF model is not as good as gradient descent method
-    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv", 
-    #                skip_feats=["pcoord_1", "min_dist"])
-    
-    # trying with v00 instead since it had proper recycling
-    #ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", savefile="ml_input_v01.tsv") # make file
-
-    ml = ML_Pcoord(h5="data/ctd_ub_1d_v00.h5", ml_input="X_ml_input_v01.tsv", seg_labels="y_ml_input_v01.tsv")
-    
-    # score = ml.split_score(score="auc", confusion=True)
-    # print(ml.plot_weights())
-
-    # tested RF with weighted input array, same/similar result, maybe a little better, need CV to be sure
-    score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="auc", confusion=True, opt_weights=False)
-    print(f"OOB: {ml.model.oob_score_}")
-    print(ml.plot_weights(weights=ml.model.feature_importances_))
-
-    #plt.show()
-    print(score)
-
-    # TODO: run cv
-    # mention in nb that using weights, can get probability estimates for binary classification
-    # of new segments not in training data and can compare to other classifiers
-
-    # TODO: run some RF random and grid search for hyperparameter opt
-    # or just regular RF with CV
-
     ### dataset with more positive labels from history ###
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", savefile="ml_input_v04_n10.tsv", n_succ=10)
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_v04_n3.tsv", seg_labels="y_ml_input_v04_n3.tsv")
     #ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", ml_input="X_ml_input_cut.tsv", seg_labels="y_ml_input_cut.tsv")
     #ml.count_tf()
+
+    ### rocauc plot and opt all feats ###
+    # ml = ML_Pcoord(h5="data/ctd_ub_1d_v04.h5", 
+    #                ml_input="ml_input/X_ml_input_v04.tsv", 
+    #                seg_labels="ml_input/y_ml_input_v04.tsv")
+    # fw = ml.optimize_pcoord(plot=True, recycle=1)
+    # top = ml.plot_weights()
+    # print(top)
+    # plt.show()
+
+    ##############################################################
+    ######################### Post Class #########################
+    ##############################################################
+    # new testing of W184 distance matrix opt
+    # make file (TODO: have method for making file, check if exists and use if it does)
+    # ml = ML_Pcoord(h5="data/1d_v06.h5", savefile="ml_input_v06.tsv",
+    #                skip_feats=["M1W184_M2_DMAT", "M2W184_M1_DMAT"],
+    #                ml_input="X_ml_input_v06.tsv", seg_labels="y_ml_input_v06.tsv")
+    # ml.optimize_pcoord(plot=True)
+    # top = ml.plot_weights()
+    # print(top)
+    # plt.show()
+
+    skip = ['1_75_39_c2', 'M1E175_M1T148', 'M1E175_M2W184', 'M1M2_COM', 'M1M2_L46', 'M1W184_M2_DMAT', 'M1_E175_chi1', 'M1_E175_chi2', 'M1_E175_chi3', 'M1_E175_phi', 'M1_E175_psi', 'M2E175_M1W184', 'M2W184_M1_DMAT', 'M2_E175_chi1', 'M2_E175_chi2', 'M2_E175_chi3', 'M2_E175_phi', 'M2_E175_psi', 'angle_3pt', 'com_dist', 'inter_nc', 'inter_nnc', 'intra_nc', 'intra_nnc', 'm1_sasa_mdt', 'm2_sasa_mdt', 'min_dist', 'rms_184_185', 'rms_bb_nmr', 'rms_bb_xtal', 'rms_dimer_int_nmr', 'rms_dimer_int_xtal', 'rms_h9m1_nmr', 'rms_h9m1_xtal', 'rms_h9m2_nmr', 'rms_h9m2_xtal', 'rms_heavy_nmr', 'rms_heavy_xtal', 'rms_key_int_nmr', 'rms_key_int_xtal', 'rms_m1_nmr', 'rms_m1_xtal', 'rms_m2_nmr', 'rms_m2_xtal', 'rog', 'rog_cut', 'secondary_struct', 'total_sasa', 'total_sasa_mdt']
+
+    # trying it with W184 distance matrix only
+    ml = ML_Pcoord(h5="data/1d_v06.h5", savefile="ml_input_v06_dm.tsv",
+                   skip_feats=skip)
+                   #ml_input="X_ml_input_v06_dm.tsv", seg_labels="y_ml_input_v06_dm.tsv")
+    # ml.optimize_pcoord(plot=True)
+    # top = ml.plot_weights()
+    # print(top)
+    # plt.show()
