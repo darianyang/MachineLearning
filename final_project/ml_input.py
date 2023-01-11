@@ -286,7 +286,8 @@ class ML_Input_Gen:
             col_names = self.feat_names + ["label"]
             # convert to pandas df and save
             df = pd.DataFrame(ml_input, columns=col_names)
-            df.to_csv(self.savefile, sep="\t")
+            # save tsv and don't include the index/row values
+            df.to_csv(self.savefile, sep="\t", index=False)
 
         return ml_input, seg_labels
 
@@ -294,3 +295,15 @@ if __name__ == "__main__":
     ml = ML_Input_Gen(h5="data/1d_v06.h5", first_iter=400, last_iter=410,
                       skip_feats=["M1W184_M2_DMAT", "M2W184_M1_DMAT"],
                       savefile="ml_input/ml_input_v06.tsv")
+
+
+    # skip = ['1_75_39_c2', 'M1E175_M1T148', 'M1E175_M2W184', 'M1M2_COM', 'M1M2_L46', 'M1W184_M2_DMAT', 'M1_E175_chi1', 'M1_E175_chi2', 'M1_E175_chi3', 'M1_E175_phi', 'M1_E175_psi', 'M2E175_M1W184', 'M2W184_M1_DMAT', 'M2_E175_chi1', 'M2_E175_chi2', 'M2_E175_chi3', 'M2_E175_phi', 'M2_E175_psi', 'angle_3pt', 'com_dist', 'inter_nc', 'inter_nnc', 'intra_nc', 'intra_nnc', 'm1_sasa_mdt', 'm2_sasa_mdt', 'min_dist', 'rms_184_185', 'rms_bb_nmr', 'rms_bb_xtal', 'rms_dimer_int_nmr', 'rms_dimer_int_xtal', 'rms_h9m1_nmr', 'rms_h9m1_xtal', 'rms_h9m2_nmr', 'rms_h9m2_xtal', 'rms_heavy_nmr', 'rms_heavy_xtal', 'rms_key_int_nmr', 'rms_key_int_xtal', 'rms_m1_nmr', 'rms_m1_xtal', 'rms_m2_nmr', 'rms_m2_xtal', 'rog', 'rog_cut', 'secondary_struct', 'total_sasa', 'total_sasa_mdt']
+
+    # # trying it with W184 distance matrix only
+    # ml = ML_Pcoord(h5="data/1d_v06.h5", savefile="ml_input_v06_dm.tsv",
+    #                skip_feats=skip)
+                       #ml_input="X_ml_input_v06_dm.tsv", seg_labels="y_ml_input_v06_dm.tsv")
+    # ml.optimize_pcoord(plot=True)
+    # top = ml.plot_weights()
+    # print(top)
+    # plt.show()
