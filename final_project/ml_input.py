@@ -92,7 +92,7 @@ class ML_Input_Gen:
                 np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata/{aux}"])).shape[2]
                 self.n_features += n_aux
                 for dim in range(n_aux):
-                    self.feat_names.append(f"{aux}_{dim}")
+                    self.feat_names.append(f"{aux}_{dim:03d}")
 
         # ml_input array options
         # number of (iter, seg) pairs to count as True
@@ -203,7 +203,6 @@ class ML_Input_Gen:
         if self.rand_ml_input:
             # make labels 50/50 T/F (back half of array as True (1))
             seg_labels[(int(seg_labels.shape[0] / 2)):] = 1
-
             # put random values for ml_input
             ml_input = np.random.rand(self.total_segs, self.n_features)
 
@@ -225,21 +224,23 @@ class ML_Input_Gen:
                     for feat_i, feat in enumerate(self.feat_names):
                         # need to account for pcoords before auxdata
                         if feat[:-2] == "pcoord":
-                            feat_name = "pcoord"
-                            feat_depth = int(feat[-1:])
+                            feat_name = feat[:-4]
                         else:
-                            feat_name = f"auxdata/{feat}"
-                            # TODO: eventually can account for multi depth dim auxdata
-                            # e.g. for a distance matrix (maybe W184 M1 to all M2 residues and vv)
-                            feat_depth = 0
+                            feat_name = f"auxdata/{feat[:-4]}"
+
+                        # account for multi depth dim pcoords or auxdata
+                        # e.g. for a distance matrix (maybe W184 M1 to all M2 residues and vv)
+                        # need to also be able to account for larger indices
+                        feat_depth = int(feat[-3:])
 
                         ### calc the ∆feat value of each feature of current (it, wlk) ###
                         # first grab the correctly indexed (it, wlk, feat) array from h5 file
-                        it_wlk_feat_data = np.atleast_2d(self.h5[f"iterations/iter_{it:08d}/{feat_name}"][wlk])
-                        # properly shape the array for ndims of auxdata
-                        if feat_name[:7] == "auxdata":
-                            # (if tau=11) goes from row to column (1, 11) to (11, 1); pcoord is (11, n)
-                            it_wlk_feat_data = it_wlk_feat_data.reshape(self.tau, 1)
+                        it_wlk_feat_data = np.atleast_3d(self.h5[f"iterations/iter_{it:08d}/{feat_name}"][wlk])
+                        
+                        # # properly shape the array for ndims of auxdata
+                        # if feat_name[:7] == "auxdata":
+                        #     # (if tau=11) goes from row to column (1, 11) to (11, 1); pcoord is (11, n)
+                        #     it_wlk_feat_data = it_wlk_feat_data.reshape(self.tau, 1)
 
                         # ∆feat = |last frame - first frame|
                         d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
@@ -288,4 +289,4 @@ if __name__ == "__main__":
     ml = ML_Input_Gen(h5="data/1d_v06.h5", first_iter=400, last_iter=410,
                       skip_feats=skip,
                       savefile="ml_input/ml_input_v06_dmat.tsv")
-    #ml.create_ml_input()
+    ml.create_ml_input()
