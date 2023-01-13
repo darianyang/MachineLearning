@@ -21,8 +21,7 @@ np.seterr(divide="ignore", invalid="ignore")
 
 class ML_Input_Gen:
     def __init__(self, h5, first_iter=1, last_iter=None, savefile=None,
-                 ml_input=None, seg_labels=None, skip_feats=None, n_succ=0,
-                 label_space=None, rand_ml_input=False, gen_ml_input=True):
+                 skip_feats=[], n_succ=0, label_space=None, rand_ml_input=False):
         """
         Methods to generate input for machine learning based pcoord from a west.h5 file.
 
@@ -39,14 +38,11 @@ class ML_Input_Gen:
         savefile : str
             Optional path to save the output ml_input array as a tsv.
             Saves the features as X_{savefile} and classifications as y_{savefile}.
-        ml_input : str
-            Path to input data file if already made, if present, does not generate new ml_input.
-            Must also have seg_labels input file.
-        seg_labels : str
-            Path to input label file if already made, if present, does not generate new seg_labels.
-            Must also have ml_input input file.
+        only_feats : list (TODO)
+            List of str feature names, if included, only the listed features will be included.
         skip_feats : list
             List of str feature names to not include in ml_input dataset.
+            By default is an empty list, so no features are skipped.
             TODO: option to toggle to select only these feats (inverse this).
         n_succ : int
             Number of (iter, seg) additional pairs in each successfull trace path to label as True.
@@ -60,8 +56,6 @@ class ML_Input_Gen:
             With None, use the recycled trajectories from west.h5.
         rand_ml_input : bool
             Default False, if True, ml_input is random values with 50/50 T/F labels.
-        gen_ml_input : bool
-            Deafult True, generate the ml_input array.
         """
         # import west.h5 data file
         self.h5 = h5py.File(h5, "r")
@@ -70,8 +64,6 @@ class ML_Input_Gen:
             self.last_iter = last_iter
         else:
             self.last_iter = self.h5.attrs["west_current_iteration"] - 1
-        self.ml_input = ml_input
-        self.seg_labels = seg_labels
 
         # n segments per all iterations
         self.n_particles = self.h5["summary"]["n_particles"]
@@ -82,10 +74,17 @@ class ML_Input_Gen:
         self.tau = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[1]
 
         # n features per iteration (must be constant for all iterations)
-        self.n_features = len(list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"]))
-        # and every pcoord tracked (n depth)
-        n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[2]
-        self.n_features += n_pcoords
+        #self.n_features = len(list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"]))
+        self.n_features = 0
+        for aux in list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"]):
+            # only skip if specified
+            if aux not in skip_feats:
+                self.n_features += \
+                np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata/{aux}"])).shape[2]
+        # and every pcoord tracked (n depth) unless otherwise skipped
+        if "pcoord" not in skip_feats:
+            n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[2]
+            self.n_features += n_pcoords
 
         # TODO: *** adjust this to handle multi-dim aux data
         
@@ -108,15 +107,6 @@ class ML_Input_Gen:
         self.savefile = savefile
         self.label_space = label_space
         self.rand_ml_input = rand_ml_input
-
-        # only make input array if specified
-        if gen_ml_input:
-            # don't create the ml_input array if provided with filepath str
-            if self.ml_input is None or self.seg_labels is None:
-                self.ml_input, self.seg_labels = self.create_ml_input()
-            elif isinstance(self.ml_input, str):
-                self.ml_input = np.loadtxt(self.ml_input)
-                self.seg_labels = np.loadtxt(self.seg_labels)
 
     ### trace_walker and get_parents helper methods normally avail in wedap ###
     def get_parents(self, walker_tuple):
@@ -292,18 +282,16 @@ class ML_Input_Gen:
         return ml_input, seg_labels
 
 if __name__ == "__main__":
+    # ml = ML_Input_Gen(h5="data/1d_v06.h5", first_iter=400, last_iter=410,
+    #                   skip_feats=["M1W184_M2_DMAT", "M2W184_M1_DMAT"],
+    #                   savefile="ml_input/ml_input_v06.tsv")
+    # ml.create_ml_input()
+
+    # skip all except dmatrix (TODO: make into an arg)
+    skip = ['pcoord', '1_75_39_c2', 'M1E175_M1T148', 'M1E175_M2W184', 'M1M2_COM', 'M1M2_L46', 'M1W184_M2_DMAT', 'M1_E175_chi1', 'M1_E175_chi2', 'M1_E175_chi3', 'M1_E175_phi', 'M1_E175_psi', 'M2E175_M1W184', 'M2E175_M2T148', 'M2_E175_chi1', 'M2_E175_chi2', 'M2_E175_chi3', 'M2_E175_phi', 'M2_E175_psi', 'angle_3pt', 'com_dist', 'inter_nc', 'inter_nnc', 'intra_nc', 'intra_nnc', 'm1_sasa_mdt', 'm2_sasa_mdt', 'min_dist', 'rms_184_185', 'rms_bb_nmr', 'rms_bb_xtal', 'rms_dimer_int_nmr', 'rms_dimer_int_xtal', 'rms_h9m1_nmr', 'rms_h9m1_xtal', 'rms_h9m2_nmr', 'rms_h9m2_xtal', 'rms_heavy_nmr', 'rms_heavy_xtal', 'rms_key_int_nmr', 'rms_key_int_xtal', 'rms_m1_nmr', 'rms_m1_xtal', 'rms_m2_nmr', 'rms_m2_xtal', 'rog', 'rog_cut', 'secondary_struct', 'total_sasa', 'total_sasa_mdt']
+
+    # trying it with W184 distance matrix only
     ml = ML_Input_Gen(h5="data/1d_v06.h5", first_iter=400, last_iter=410,
-                      skip_feats=["M1W184_M2_DMAT", "M2W184_M1_DMAT"],
-                      savefile="ml_input/ml_input_v06.tsv")
-
-
-    # skip = ['1_75_39_c2', 'M1E175_M1T148', 'M1E175_M2W184', 'M1M2_COM', 'M1M2_L46', 'M1W184_M2_DMAT', 'M1_E175_chi1', 'M1_E175_chi2', 'M1_E175_chi3', 'M1_E175_phi', 'M1_E175_psi', 'M2E175_M1W184', 'M2W184_M1_DMAT', 'M2_E175_chi1', 'M2_E175_chi2', 'M2_E175_chi3', 'M2_E175_phi', 'M2_E175_psi', 'angle_3pt', 'com_dist', 'inter_nc', 'inter_nnc', 'intra_nc', 'intra_nnc', 'm1_sasa_mdt', 'm2_sasa_mdt', 'min_dist', 'rms_184_185', 'rms_bb_nmr', 'rms_bb_xtal', 'rms_dimer_int_nmr', 'rms_dimer_int_xtal', 'rms_h9m1_nmr', 'rms_h9m1_xtal', 'rms_h9m2_nmr', 'rms_h9m2_xtal', 'rms_heavy_nmr', 'rms_heavy_xtal', 'rms_key_int_nmr', 'rms_key_int_xtal', 'rms_m1_nmr', 'rms_m1_xtal', 'rms_m2_nmr', 'rms_m2_xtal', 'rog', 'rog_cut', 'secondary_struct', 'total_sasa', 'total_sasa_mdt']
-
-    # # trying it with W184 distance matrix only
-    # ml = ML_Pcoord(h5="data/1d_v06.h5", savefile="ml_input_v06_dm.tsv",
-    #                skip_feats=skip)
-                       #ml_input="X_ml_input_v06_dm.tsv", seg_labels="y_ml_input_v06_dm.tsv")
-    # ml.optimize_pcoord(plot=True)
-    # top = ml.plot_weights()
-    # print(top)
-    # plt.show()
+                      skip_feats=skip,
+                      savefile="ml_input/ml_input_v06_dmat.tsv")
+    #ml.create_ml_input()
