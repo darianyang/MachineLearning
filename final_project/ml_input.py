@@ -73,32 +73,26 @@ class ML_Input_Gen:
         # save tau value (columns of pcoord array)
         self.tau = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[1]
 
+        # to be filled with names of each feature with index value appended
+        self.feat_names = []
+
+        # account for every pcoord tracked (n depth) unless otherwise skipped
+        if "pcoord" not in skip_feats:
+            n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[2]
+            self.n_features += n_pcoords
+            for dim in range(n_pcoords):
+                self.feat_names.append(f"pcoord_{dim}")
+
         # n features per iteration (must be constant for all iterations)
-        #self.n_features = len(list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"]))
         self.n_features = 0
         for aux in list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"]):
             # only skip if specified
             if aux not in skip_feats:
-                self.n_features += \
+                n_aux = \
                 np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata/{aux}"])).shape[2]
-        # and every pcoord tracked (n depth) unless otherwise skipped
-        if "pcoord" not in skip_feats:
-            n_pcoords = np.atleast_3d(np.array(self.h5[f"iterations/iter_{self.last_iter:08d}/pcoord"])).shape[2]
-            self.n_features += n_pcoords
-
-        # TODO: *** adjust this to handle multi-dim aux data
-        
-        # get the names of each feature (and multiple pcoords)
-        self.feat_names = [f"pcoord_{dim}" for dim in range(n_pcoords)] + \
-                           list(self.h5[f"iterations/iter_{self.last_iter:08d}/auxdata"])
-
-        # optionally skip certain specified features
-        if skip_feats:
-            self.skip_feats = skip_feats
-            # subtract the skipped feats from total n_features
-            self.n_features -= len(skip_feats)
-            # remove skipped feats from feature name list
-            self.feat_names = [i for i in self.feat_names if i not in self.skip_feats]
+                self.n_features += n_aux
+                for dim in range(n_aux):
+                    self.feat_names.append(f"{aux}_{dim}")
 
         # ml_input array options
         # number of (iter, seg) pairs to count as True
