@@ -323,7 +323,7 @@ class ML_Pcoord:
         print(f"TRUE: {t} | FALSE: {f}")
 
 if __name__ == "__main__":
-    ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull.tsv")
+    ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull2.tsv")
     ml.optimize_pcoord(plot=True)
     top = ml.plot_weights(15)
     print(top)
@@ -331,4 +331,5 @@ if __name__ == "__main__":
     plt.show()
 
     # save weights to file
-    np.savetxt("M2W184_M1_DMAT_weights.txt", ml.feat_w, delimiter="\t")
+    #np.savetxt("M2W184_M1_DMAT_weights.txt", ml.feat_w, delimiter="\t")
+    np.savetxt("M1W184_M2_DMAT_weights.txt", ml.feat_w, delimiter="\t")
