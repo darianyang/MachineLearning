@@ -245,6 +245,8 @@ class ML_Input_Gen:
                         # ∆feat = |last frame - first frame|
                         d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
                                             it_wlk_feat_data[:, feat_depth][0])
+                        # ∆feat = last frame - first frame (this didn't work very well)
+                        #d_feat = it_wlk_feat_data[:, feat_depth][-1] - it_wlk_feat_data[:, feat_depth][0]
 
                         # assign values of ml_input array
                         ml_input[seg_n, feat_i] = d_feat
@@ -288,5 +290,5 @@ if __name__ == "__main__":
     # trying it with W184 distance matrix only
     ml = ML_Input_Gen(h5="data/1d_v06.h5", first_iter=280, last_iter=500,
                       skip_feats=skip,
-                      savefile="ml_input/ml_input_v06_dmatfull2.tsv")
+                      savefile="ml_input/ml_input_v06_dmatfull3.tsv")
     ml.create_ml_input()

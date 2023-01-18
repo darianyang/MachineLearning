@@ -3,6 +3,7 @@ ML_Pcoord class to create the initial dataset and run weight optimization.
 TODO: Eventually, integrate into wedap.
 """
 
+import re
 import numpy as np
 import pandas as pd
 
@@ -322,14 +323,41 @@ class ML_Pcoord:
 
         print(f"TRUE: {t} | FALSE: {f}")
 
+    def chimera_selection(self, top_n=15):
+        """
+        Print a chimera selection command of the top weighted distances.
+        """
+        top = np.argpartition(self.feat_w, -top_n)[-top_n:]
+        
+        # sort by weight and return top n
+        sorted_w = sorted(zip(np.array(self.feat_names)[top], self.feat_w[top]), 
+                          key=lambda t: t[1], reverse=True)
+        
+        # convert to list of the top residue (integers)
+        residues = [int(i[0][-3:]) for i in sorted_w]
+
+        # build selection command
+        selection_m1 = "select :"
+        selection_m2 = "select :"
+        for res in residues:
+            selection_m1 += str(res)
+            selection_m2 += str(res+88)
+            # only add comma to non final residues
+            if res != residues[-1]:
+                selection_m1 += ","
+                selection_m2 += ","
+        print(selection_m1)
+        print(selection_m2)
+
 if __name__ == "__main__":
-    ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull2.tsv")
-    ml.optimize_pcoord(plot=True)
-    top = ml.plot_weights(15)
-    print(top)
-    ml.count_tf()
-    plt.show()
+    ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull3.tsv")
+    ml.optimize_pcoord(plot=True, recycle=1)
+    ml.chimera_selection()
+    # top = ml.plot_weights(15)
+    # print(top)
+    # ml.count_tf()
+    # plt.show()
 
     # save weights to file
     #np.savetxt("M2W184_M1_DMAT_weights.txt", ml.feat_w, delimiter="\t")
-    np.savetxt("M1W184_M2_DMAT_weights.txt", ml.feat_w, delimiter="\t")
+    #np.savetxt("M1W184_M2_DMAT_weights2.txt", ml.feat_w, delimiter="\t")
