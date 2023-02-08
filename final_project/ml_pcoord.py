@@ -350,13 +350,16 @@ class ML_Pcoord:
         print(selection_m2)
 
 if __name__ == "__main__":
-    ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull3.tsv")
+    ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull2.tsv")
     ml.optimize_pcoord(plot=True, recycle=1)
     ml.chimera_selection()
-    # top = ml.plot_weights(15)
+    print("split validation score:")
+    print(ml.split_score(opt_weights=True))
+    top = ml.plot_weights(15)
     # print(top)
     # ml.count_tf()
-    # plt.show()
+    plt.tight_layout()
+    plt.show()
 
     # save weights to file
     #np.savetxt("M2W184_M1_DMAT_weights.txt", ml.feat_w, delimiter="\t")
