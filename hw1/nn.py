@@ -9,6 +9,7 @@ import torch
 from torch.utils.data import Dataset, DataLoader
 from typing import Optional, List, Tuple, Dict
 
+import matplotlib.pyplot as plt
 
 if torch.cuda.is_available():
     device = torch.device("cuda")
@@ -63,7 +64,9 @@ class ReLU(Transform):
         x shape (indim, batch_size)
         return shape (indim, batch_size)
         """
-        raise NotImplementedError()
+        # h = ReLU(q) = max(0,q)
+        return x * (x > 0)
+
 
     def backward(self, grad_wrt_out):
         """
@@ -90,7 +93,8 @@ class LinearMap(Transform):
         x shape (indim, batch_size)
         return shape (outdim, batch_size)
         """
-        raise NotImplementedError()
+        # q = W * x + B
+        return (self.weights * x) + self.bias
 
 
     def backward(self, grad_wrt_out):
@@ -139,7 +143,9 @@ class SoftmaxCrossEntropyLoss(object):
 
 
 class SingleLayerMLP(Transform):
-    """constructing a single layer neural network with the previous functions"""
+    """
+    constructing a single layer neural network with the previous functions
+    """
     def __init__(self, indim, outdim, hidden_layer=100, lr=0.001):
         super(SingleLayerMLP, self).__init__()
         raise NotImplementedError()
@@ -184,7 +190,8 @@ def labels2onehot(labels: np.ndarray):
     return np.array([[i==lab for i in range(2)] for lab in labels]).astype(int)
 
 if __name__ == "__main__":
-    """The dataset loaders were provided for you.
+    """
+    The dataset loaders were provided for you.
     You need to implement your own training process.
     You need plot the loss and accuracies during the training process and test process. 
     """
@@ -197,21 +204,55 @@ if __name__ == "__main__":
     epochs = 200
 
     #dataset
-    Xtrain = np.loadtxt("/Users/liu5/Documents/ta/2023 spring/HW1/data/XTrain.txt", delimiter="\t")
-    Ytrain = np.loadtxt("/Users/liu5/Documents/ta/2023 spring/HW1/data/yTrain.txt", delimiter="\t").astype(int)
+    Xtrain = np.loadtxt("data/XTrain.txt", delimiter="\t")
+    Ytrain = np.loadtxt("data/yTrain.txt", delimiter="\t").astype(int)
     m1, n1 = Xtrain.shape
-    print(m1, n1)
+    print("Xtrain shape:", m1, n1)
     train_ds = DS(Xtrain, Ytrain)
     train_loader = DataLoader(train_ds, batch_size=batch_size)
 
-    Xtest = np.loadtxt("/Users/liu5/Documents/ta/2023 spring/HW1/data/XTest.txt", delimiter="\t")
-    Ytest = np.loadtxt("/Users/liu5/Documents/ta/2023 spring/HW1/data/yTest.txt", delimiter="\t").astype(int)
+    # data exploration
+    train_features, train_labels = next(iter(train_loader))
+    print(f"Feature batch shape: {train_features.size()}")
+    print(f"Labels batch shape: {train_labels.size()}")
+    #print(train_features)
+
+    Xtest = np.loadtxt("data/XTest.txt", delimiter="\t")
+    Ytest = np.loadtxt("data/yTest.txt", delimiter="\t").astype(int)
     m2, n2 = Xtest.shape
-    print(m1, n2)
+    print("Xtest shape:", m1, n2)
     test_ds = DS(Xtest, Ytest)
     test_loader = DataLoader(test_ds, batch_size=batch_size)
 
-    #construct the model
-    raise NotImplementedError()
-    #construct the training process
-    raise NotImplementedError()
+    # construct the model then
+    # construct the training process
+    #raise NotImplementedError()
+
+
+    # what are the steps after loading data?
+    
+    # then non-linearity through ReLU
+    # feed output of ReLU to next linear transformation
+    # apply softmax to transform to probabilities
+    # then calc cross-entropy from probabilities
+    # classification is difference of labels
+    # probabilty of labels gets accuracy
+    # I will define forward and backwards functions for each step
+
+    # TODO: prob need to adjust this data sizes and inputs eventually
+    # for now, this is a good test system
+    # first linear mapping 
+    lm = LinearMap(indim, batch_size)
+    lm_out = lm.forward(train_features)
+    # then activation function transform
+    relu_out = ReLU().forward(lm_out)
+    # then another linear mapping
+    lm2_out = LinearMap(indim, batch_size).forward(train_features)
+    # then softmax probability transform
+    # then calculate loss (cross-entropy)
+
+    # plot to check
+    plt.plot(lm2_out.detach().numpy())
+    plt.show()
+
+
