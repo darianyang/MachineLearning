@@ -65,14 +65,22 @@ class ReLU(Transform):
         return shape (indim, batch_size)
         """
         # h = ReLU(q) = max(0,q)
-        return x * (x > 0)
-
+        self.x = x
+        self.y = x * (x > 0)
+        return self.y
 
     def backward(self, grad_wrt_out):
         """
         grad_wrt_out shape (outdim, batch_size)
         """
-        raise NotImplementedError()
+        #compute & return grad_wrt_input (dE/dX) 
+        # TODO: which to calc grad for?
+        # get deep copy of dE/dY
+        self.x_grad = grad_wrt_out.clone()
+        # derivative of ReLU
+        self.x_grad[grad_wrt_out < 0] = 0
+        self.x_grad[grad_wrt_out > 0] = 1
+        return self.x_grad
 
 
 class LinearMap(Transform):
@@ -87,17 +95,15 @@ class LinearMap(Transform):
         self.bias = 0.01 * torch.rand((outdim, 1), dtype=torch.float64, requires_grad=True, device=device)
         self.lr = lr
 
-
     def forward(self, x):
         """
         x shape (indim, batch_size)
-        return shape (outdim, batch_size)
+        return y shape (outdim, batch_size)
         """
         # q = W * x + B
         self.x = x
-        self.output = (self.weights * x) + self.bias
-        return self.output
-
+        self.y = (self.weights * x) + self.bias
+        return self.y
 
     def backward(self, grad_wrt_out):
         """
@@ -114,7 +120,6 @@ class LinearMap(Transform):
         self.x_grad = grad_wrt_out * self.weights.t()
         
         return self.x_grad
-
 
     def step(self):
         """
@@ -154,28 +159,44 @@ class SingleLayerMLP(Transform):
     """
     def __init__(self, indim, outdim, hidden_layer=100, lr=0.001):
         super(SingleLayerMLP, self).__init__()
-        raise NotImplementedError()
-
+        self.indim = indim
+        self.outdim = outdim
+        self.hidden_layer = hidden_layer
+        self.lr = lr
 
     def forward(self, x):
         """
         x shape (indim, batch_size)
         return the presoftmax logits shape(outdim, batch_size)
         """
-        raise NotImplementedError()
-
+        # first linear transform
+        self.y = LinearMap(self.indim, self.outdim, self.lr).forward(x)
+        # non-linearity with ReLU activation function
+        self.y = ReLU().forward(self.y)
+        # second linear transform --> logits (map to 0-1 probabilities)
+        self.y = LinearMap(self.indim, self.outdim, self.lr).forward(self.y)
+        # calc loss via cross-entropy?
+        return self.y
 
     def backward(self, grad_wrt_out):
         """
         grad_wrt_out shape (outdim, batch_size)
         calculate the gradients wrt the parameters
         """
-        raise NotImplementedError()
+        # grad from loss via cross-entropy?
 
+        # grad from second linear transform --> logits (map to 0-1 probabilities)
+        self.x = LinearMap(self.indim, self.outdim, self.lr).backward(grad_wrt_out)
+        # grad from non-linearity with ReLU activation function
+        self.x = ReLU().backward(self.x)
+        # grad from first linear transform
+        self.x = LinearMap(self.indim, self.outdim, self.lr).backward(self.x)
+        return self.x
     
     def step(self):
         """update model parameters"""
-        raise NotImplementedError()
+        self.weights -= self.lr * self.w_grad
+        self.bias -= self.lr * self.b_grad
 
 
 class DS(Dataset):
@@ -246,15 +267,18 @@ if __name__ == "__main__":
     lm2_out = LinearMap(indim, batch_size).forward(train_features)
     # then softmax probability transform
     # then calculate loss (cross-entropy)
+    # testing torch cross-entropy function first
+    import torch.nn
+    loss = torch.nn.CrossEntropyLoss()
+    test_features, test_labels = next(iter(test_loader))
+    loss_out = loss(lm2_out, test_features)
+    print(loss.forward(lm2_out, test_features))
 
     # plot to check
-    plt.plot(lm2_out.detach().numpy())
-    plt.show()
+    # plt.plot(lm2_out.detach().numpy())
+    # plt.show()
 
     
     # apply softmax to transform to probabilities
     # then calc cross-entropy from probabilities
-    # classification is difference of labels
-    # probabilty of labels gets accuracy
-    # I will define forward and backwards functions for each step
 
