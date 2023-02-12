@@ -94,28 +94,34 @@ class LinearMap(Transform):
         return shape (outdim, batch_size)
         """
         # q = W * x + B
-        return (self.weights * x) + self.bias
+        self.x = x
+        self.output = (self.weights * x) + self.bias
+        return self.output
 
 
     def backward(self, grad_wrt_out):
         """
-        grad_wrt_out shape (outdim, batch_size)
+        dE/dY = grad_wrt_out : shape (outdim, batch_size)
         return shape (indim, batch_size)
         """
-        #compute grad_wrt_weights
+        #compute grad_wrt_weights (dE/dW = X.T * dE/dY)
+        self.w_grad = self.x.t() * grad_wrt_out
         
-        #compute grad_wrt_bias
+        #compute grad_wrt_bias (dE/dB = dE/dY)
+        self.b_grad = grad_wrt_out
+
+        #compute & return grad_wrt_input (dE/dX = dE/dY * W.T)
+        self.x_grad = grad_wrt_out * self.weights.t()
         
-        #compute & return grad_wrt_input
-        
-        raise NotImplementedError()
+        return self.x_grad
 
 
     def step(self):
         """
         apply gradients calculated by backward() to update the parameters
         """
-        raise NotImplementedError()
+        self.weights -= self.lr * self.w_grad
+        self.bias -= self.lr * self.b_grad
 
 
 class SoftmaxCrossEntropyLoss(object):
@@ -229,16 +235,6 @@ if __name__ == "__main__":
     #raise NotImplementedError()
 
 
-    # what are the steps after loading data?
-    
-    # then non-linearity through ReLU
-    # feed output of ReLU to next linear transformation
-    # apply softmax to transform to probabilities
-    # then calc cross-entropy from probabilities
-    # classification is difference of labels
-    # probabilty of labels gets accuracy
-    # I will define forward and backwards functions for each step
-
     # TODO: prob need to adjust this data sizes and inputs eventually
     # for now, this is a good test system
     # first linear mapping 
@@ -255,4 +251,10 @@ if __name__ == "__main__":
     plt.plot(lm2_out.detach().numpy())
     plt.show()
 
+    
+    # apply softmax to transform to probabilities
+    # then calc cross-entropy from probabilities
+    # classification is difference of labels
+    # probabilty of labels gets accuracy
+    # I will define forward and backwards functions for each step
 
