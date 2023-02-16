@@ -130,27 +130,56 @@ class LinearMap(Transform):
 
 
 class SoftmaxCrossEntropyLoss(object):
+    def stable_softmax(self, X):
+        exps = torch.exp(X - torch.max(X))
+        return exps / torch.sum(exps)
+
     def forward(self, logits, labels):
         """
         logits are pre-softmax scores, labels are one-hot labels of given inputs
-        logits and labels are in the shape of (num_classes, batch_size)
+        logits and labels are in the shape of (num_classes, batch_size) (actually reversed (TODO))
         returns loss as a scalar (i.e. mean value of the batch_size loss)
         """
-        raise NotImplementedError()
-
+        # label shape for number of classes
+        self.n_classes = labels.shape[1]
+        # calc softmax of logits
+        self.logits = self.stable_softmax(logits)
+        # get deep copy of label tensor ?
+        #self.labels = labels.clone()
+        self.labels = labels # TODO
+        # convert labels to max vals 
+        #self.labels = labels.argmax(axis=1)
+        #print(self.labels)
+        # return softmax cross entropy
+        self.log_likelihood = -torch.log(self.logits[range(self.n_classes),self.labels])
+        self.loss = torch.sum(self.log_likelihood) / self.n_classes
+        return self.loss
 
     def backward(self):
         """
         return grad_wrt_logits shape (num_classes, batch_size)
         (don't forget to divide by batch_size because your loss is a mean)
         """
-        raise NotImplementedError()
+        # calc grad of the output
+        #grad = self.stable_softmax(self.log_likelihood)
+        grad = self.logits
+        grad[range(self.n_classes),self.labels] -= 1
+        grad /= self.n_classes
+        return grad
     
     def getAccu(self):
         """
         return accuracy here
         """
-        raise NotImplementedError()
+        # accuracy is percent of correct labels
+        # so comparing softmax(logits) probabilities to labels
+        # like binary mapping? 
+        # TODO
+        print("ARGMAX: ", torch.argmax(self.logits))
+        print(self.log_likelihood[0])
+        print(self.labels)
+        self.acc = np.sum(self.logits == self.labels)
+        return self.acc
 
 
 class SingleLayerMLP(Transform):
@@ -265,17 +294,27 @@ if __name__ == "__main__":
     relu_out = ReLU().forward(lm_out)
     # then another linear mapping
     lm2_out = LinearMap(indim, batch_size).forward(train_features)
-    # then softmax probability transform
-    # then calculate loss (cross-entropy)
+    
     # testing torch cross-entropy function first
-    import torch.nn
-    loss = torch.nn.CrossEntropyLoss()
-    test_features, test_labels = next(iter(test_loader))
-    loss_out = loss(lm2_out, test_features)
-    print(loss.forward(lm2_out, test_features))
+    # import torch.nn
+    # loss = torch.nn.CrossEntropyLoss()
+    # test_features, test_labels = next(iter(test_loader))
+    # loss_out = loss(lm2_out, test_features)
+    # print(loss.forward(lm2_out, test_features))
+
+    #print(lm2_out[0])
+    #print(labels2onehot(train_labels).shape)
+    
+    # calc softmax probability transform and calculate loss (cross-entropy)
+    ce_out = SoftmaxCrossEntropyLoss()
+    loss = ce_out.forward(lm2_out, labels2onehot(train_labels))
+    print(loss)
+    acc = ce_out.getAccu()
+    print(acc)
+    
 
     # plot to check
-    # plt.plot(lm2_out.detach().numpy())
+    # plt.plot(ce_out.logits.detach().numpy())
     # plt.show()
 
     
