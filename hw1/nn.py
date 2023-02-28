@@ -311,7 +311,10 @@ if __name__ == "__main__":
     print(loss)
     acc = ce_out.getAccu()
     print(acc)
-    
+    # TODO: currently need to fix accuracy calc with binary classes
+    # I should be getting probabilities for each class (1 or 0) and thus get argmax
+    # of each vector which will be the prediction, then can compare how many of my y_pred
+    # match with y_true labels
 
     # plot to check
     # plt.plot(ce_out.logits.detach().numpy())
