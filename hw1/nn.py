@@ -188,10 +188,9 @@ class SingleLayerMLP(Transform):
     """
     def __init__(self, indim, outdim, hidden_layer=100, lr=0.001):
         super(SingleLayerMLP, self).__init__()
-        self.indim = indim
-        self.outdim = outdim
-        self.hidden_layer = hidden_layer
-        self.lr = lr
+        self.lm1 = LinearMap(self.indim, self.outdim, self.lr)
+        self.relu = ReLU()
+        self.lm2 = LinearMap(self.indim, self.outdim, self.lr)
 
     def forward(self, x):
         """
@@ -199,12 +198,12 @@ class SingleLayerMLP(Transform):
         return the presoftmax logits shape(outdim, batch_size)
         """
         # first linear transform
-        self.y = LinearMap(self.indim, self.outdim, self.lr).forward(x)
+        self.y = self.lm1.forward(x)
         # non-linearity with ReLU activation function
-        self.y = ReLU().forward(self.y)
+        self.y = self.relu.forward(self.y)
         # second linear transform --> logits (map to 0-1 probabilities)
-        self.y = LinearMap(self.indim, self.outdim, self.lr).forward(self.y)
-        # calc loss via cross-entropy?
+        self.y = self.lm2.forward(self.y)
+        # calc loss via cross-entropy? TODO
         return self.y
 
     def backward(self, grad_wrt_out):
@@ -212,20 +211,20 @@ class SingleLayerMLP(Transform):
         grad_wrt_out shape (outdim, batch_size)
         calculate the gradients wrt the parameters
         """
-        # grad from loss via cross-entropy?
+        # grad from loss via cross-entropy? TODO
 
         # grad from second linear transform --> logits (map to 0-1 probabilities)
-        self.x = LinearMap(self.indim, self.outdim, self.lr).backward(grad_wrt_out)
+        self.x = self.lm2.backward(grad_wrt_out)
         # grad from non-linearity with ReLU activation function
-        self.x = ReLU().backward(self.x)
+        self.x = self.relu.backward(self.x)
         # grad from first linear transform
-        self.x = LinearMap(self.indim, self.outdim, self.lr).backward(self.x)
+        self.x = self.lm1.backward(self.x)
         return self.x
     
     def step(self):
         """update model parameters"""
-        self.weights -= self.lr * self.w_grad
-        self.bias -= self.lr * self.b_grad
+        self.lm1.step()
+        self.lm2.step()
 
 
 class DS(Dataset):

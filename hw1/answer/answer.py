@@ -140,7 +140,6 @@ class SoftmaxCrossEntropyLoss(object):
         self.batch_size = n
         return loss
 
-
     def backward(self):
         """
         return shape (num_classes, batch_size)
