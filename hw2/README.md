@@ -28,7 +28,7 @@ Das D K, Ghosh M, Pal M, et al. Machine learning approach for automated screenin
 Rajaraman S, Antani S K, Poostchi M, et al. Pre-trained convolutional neural networks as feature extractors toward improved malaria parasite detection in thin blood smear images[J]. PeerJ, 2018, 6: e4568.
 
 
-Files
+Files (placed in `MachineLearning/data` since files too large for git (ignored))
 train.zip - a folder containing the training cell images
 train_labels.csv - image name and its label (0 or 1)
 test.zip - a folder containing the testing cell images
