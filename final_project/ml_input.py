@@ -236,17 +236,29 @@ class ML_Input_Gen:
                         ### calc the ∆feat value of each feature of current (it, wlk) ###
                         # first grab the correctly indexed (it, wlk, feat) array from h5 file
                         it_wlk_feat_data = np.atleast_3d(self.h5[f"iterations/iter_{it:08d}/{feat_name}"][wlk])
-                        
+                        # print(it_wlk_feat_data[:, feat_depth].shape[0])
+                        # import sys ; sys.exit(0)
+
                         # # properly shape the array for ndims of auxdata
                         # if feat_name[:7] == "auxdata":
                         #     # (if tau=11) goes from row to column (1, 11) to (11, 1); pcoord is (11, n)
                         #     it_wlk_feat_data = it_wlk_feat_data.reshape(self.tau, 1)
 
                         # ∆feat = |last frame - first frame|
-                        d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
-                                            it_wlk_feat_data[:, feat_depth][0])
+                        # d_feat = np.absolute(it_wlk_feat_data[:, feat_depth][-1] - 
+                        #                     it_wlk_feat_data[:, feat_depth][0])
                         # ∆feat = last frame - first frame (this didn't work very well)
                         #d_feat = it_wlk_feat_data[:, feat_depth][-1] - it_wlk_feat_data[:, feat_depth][0]
+                        
+                        # ∆feat = sum of squared differences
+                        d_feat = np.sum(np.diff(it_wlk_feat_data[:, feat_depth], axis=0)**2)
+                        
+                        # ∆feat for emphasizing positive ∆ values
+                        # d_feat = np.diff(it_wlk_feat_data[:, feat_depth], axis=0)
+                        # d_feat = np.sum(d_feat[d_feat > 0])**2
+                        # ∆feat for emphasizing negative ∆ values
+                        # d_feat = np.diff(it_wlk_feat_data[:, feat_depth], axis=0)
+                        # d_feat = np.sum(d_feat[d_feat < 0])**2
 
                         # assign values of ml_input array
                         ml_input[seg_n, feat_i] = d_feat
@@ -256,12 +268,14 @@ class ML_Input_Gen:
                     # iterate the overall row number
                     seg_n += 1
 
-            # standardize: actually, just norm should be fine since these are |∆values|
+            # standardize: actually, just norm should be fine since these are already similar
+            # they are all just distance changes
             #ml_input = sklearn.preprocessing.StandardScaler().fit_transform(ml_input)
             
             # l2 is sum of squares norm, l1 is sum of abs vector values, max is maximum value norm
             # for me, max value norm is most intuitive here
             # normalizing each feature ∆value (axis=0)
+            # note I can always norm later
             if norm:
                 ml_input = sklearn.preprocessing.normalize(ml_input, norm="max", axis=0)
 
@@ -285,10 +299,11 @@ if __name__ == "__main__":
     # ml.create_ml_input()
 
     # skip all except dmatrix (TODO: make into an arg)
-    skip = ['pcoord', '1_75_39_c2', 'M1E175_M1T148', 'M1E175_M2W184', 'M1M2_COM', 'M1M2_L46', 'M2W184_M1_DMAT', 'M1_E175_chi1', 'M1_E175_chi2', 'M1_E175_chi3', 'M1_E175_phi', 'M1_E175_psi', 'M2E175_M1W184', 'M2E175_M2T148', 'M2_E175_chi1', 'M2_E175_chi2', 'M2_E175_chi3', 'M2_E175_phi', 'M2_E175_psi', 'angle_3pt', 'com_dist', 'inter_nc', 'inter_nnc', 'intra_nc', 'intra_nnc', 'm1_sasa_mdt', 'm2_sasa_mdt', 'min_dist', 'rms_184_185', 'rms_bb_nmr', 'rms_bb_xtal', 'rms_dimer_int_nmr', 'rms_dimer_int_xtal', 'rms_h9m1_nmr', 'rms_h9m1_xtal', 'rms_h9m2_nmr', 'rms_h9m2_xtal', 'rms_heavy_nmr', 'rms_heavy_xtal', 'rms_key_int_nmr', 'rms_key_int_xtal', 'rms_m1_nmr', 'rms_m1_xtal', 'rms_m2_nmr', 'rms_m2_xtal', 'rog', 'rog_cut', 'secondary_struct', 'total_sasa', 'total_sasa_mdt']
+    skip = ['pcoord', '1_75_39_c2', 'M1E175_M1T148', 'M1E175_M2W184', 'M1M2_COM', 'M1M2_L46', 'M1W184_M2_DMAT', 'M1_E175_chi1', 'M1_E175_chi2', 'M1_E175_chi3', 'M1_E175_phi', 'M1_E175_psi', 'M2E175_M1W184', 'M2E175_M2T148', 'M2_E175_chi1', 'M2_E175_chi2', 'M2_E175_chi3', 'M2_E175_phi', 'M2_E175_psi', 'angle_3pt', 'com_dist', 'inter_nc', 'inter_nnc', 'intra_nc', 'intra_nnc', 'm1_sasa_mdt', 'm2_sasa_mdt', 'min_dist', 'rms_184_185', 'rms_bb_nmr', 'rms_bb_xtal', 'rms_dimer_int_nmr', 'rms_dimer_int_xtal', 'rms_h9m1_nmr', 'rms_h9m1_xtal', 'rms_h9m2_nmr', 'rms_h9m2_xtal', 'rms_heavy_nmr', 'rms_heavy_xtal', 'rms_key_int_nmr', 'rms_key_int_xtal', 'rms_m1_nmr', 'rms_m1_xtal', 'rms_m2_nmr', 'rms_m2_xtal', 'rog', 'rog_cut', 'secondary_struct', 'total_sasa', 'total_sasa_mdt']
 
     # trying it with W184 distance matrix only
-    ml = ML_Input_Gen(h5="data/1d_v06.h5", first_iter=280, last_iter=500,
-                      skip_feats=skip,
-                      savefile="ml_input/ml_input_v06_dmatfull3.tsv")
+    ml = ML_Input_Gen(h5="data/1d_v06.h5", first_iter=200, last_iter=500,
+                      skip_feats=skip, n_succ=50,
+                      #savefile="ml_input/ml_input_v06_m1w184_m2_nsucc50_ss.tsv")
+                      savefile="ml_input/ml_input_v06_m2w184_m1_nsucc50_ss.tsv")
     ml.create_ml_input()

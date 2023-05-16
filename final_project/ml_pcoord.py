@@ -143,7 +143,7 @@ class ML_Pcoord:
                 print("--------------------------------------------")
                 if plot:
                     fpr, tpr, _ = sklearn.metrics.roc_curve(self.seg_labels,
-                                                                     self.feat_weighted)
+                                                            self.feat_weighted)
                     self.plot_roc_curve(fpr, tpr, -self.loss_f(feat_w), f"PRE | ", ax)
 
             # then optimize feature weighs using optimized iteration weights
@@ -336,6 +336,9 @@ class ML_Pcoord:
         # convert to list of the top residue (integers)
         residues = [int(i[0][-3:]) for i in sorted_w]
 
+        # change to fix indexing from 0 to 1 for chimera compatibility
+        residues = np.add(residues, 1)
+
         # build selection command
         selection_m1 = "select :"
         selection_m2 = "select :"
@@ -350,17 +353,29 @@ class ML_Pcoord:
         print(selection_m2)
 
 if __name__ == "__main__":
-    ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull2.tsv")
+    #ml = ML_Pcoord("ml_input/ml_input_v06_dmatfull2.tsv")
+    #ml = ML_Pcoord("ml_input/ml_input_v06_m2w184_m1.tsv")
+    #ml = ML_Pcoord("ml_input/ml_input_v06_m2w184_m1_nsucc10_sq.tsv")
+    #ml = ML_Pcoord("ml_input/ml_input_v06_m2w184_m1_nsucc10_pos.tsv")
+    ml = ML_Pcoord("ml_input/ml_input_v06_m2w184_m1_nsucc50_ss.tsv")
     ml.optimize_pcoord(plot=True, recycle=1)
     ml.chimera_selection()
     print("split validation score:")
     print(ml.split_score(opt_weights=True))
+
+    # RF test (TODO: add option to input weights and input from RF, e.g. iteratively opt weights from RF)
+    # score = ml.split_score(ensemble.RandomForestClassifier(oob_score=True), score="acc", confusion=True, opt_weights=False)
+    # print(f"OOB: {ml.model.oob_score_}")
+    # print(ml.plot_weights(weights=ml.model.feature_importances_))
+    # print("TEST/TRAIN SPLIT SCORE: ", score)
+    # ml.chimera_selection()
+
     top = ml.plot_weights(15)
-    # print(top)
-    # ml.count_tf()
+    print(top)
+    ml.count_tf()
     plt.tight_layout()
     plt.show()
 
     # save weights to file
-    #np.savetxt("M2W184_M1_DMAT_weights.txt", ml.feat_w, delimiter="\t")
-    #np.savetxt("M1W184_M2_DMAT_weights2.txt", ml.feat_w, delimiter="\t")
+    np.savetxt("m2w184_m1_weights.txt", ml.feat_w, delimiter="\t")
+    #np.savetxt("m1w184_m2_weights.txt", ml.feat_w, delimiter="\t")
